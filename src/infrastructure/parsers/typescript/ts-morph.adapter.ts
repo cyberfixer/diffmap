@@ -12,8 +12,13 @@ interface SymbolInfo {
   range: LineRange;
 }
 
-interface SymbolCollection {
-  named: Map<string, SymbolInfo>;
+/** Everything we learned about one side (base or head) of a file. */
+interface SideAnalysis {
+  /** Every named symbol that exists in the full file on this side. */
+  all: Map<string, SymbolInfo>;
+  /** Names of symbols containing at least one changed line on this side. */
+  touched: Set<string>;
+  /** Number of changed lines that fall outside every named symbol. */
   topLevelCount: number;
 }
 
@@ -27,20 +32,20 @@ export class TsMorphAdapter implements SymbolParserPort {
   parse(input: SymbolParserInput): ChangedSymbol[] {
     const { filePath, removedLines, addedLines, baseSource, headSource } = input;
 
-    const baseSymbols = collectSymbols(baseSource, removedLines);
-    const headSymbols = collectSymbols(headSource, addedLines);
+    const base = analyzeSide(baseSource, removedLines);
+    const head = analyzeSide(headSource, addedLines);
 
     const results: ChangedSymbol[] = [];
 
-    // Merge named symbols by name
-    const allNames = new Set([
-      ...baseSymbols.named.keys(),
-      ...headSymbols.named.keys(),
-    ]);
+    // A symbol is "changed" if any of its lines changed on either side.
+    // Its status comes from whether it exists in the WHOLE file on each side,
+    // not from which side its changed lines were on.
+    const changedNames = new Set([...base.touched, ...head.touched]);
 
-    for (const name of allNames) {
-      const inBase = baseSymbols.named.get(name);
-      const inHead = headSymbols.named.get(name);
+    for (const name of changedNames) {
+      const inBase = base.all.get(name);
+      const inHead = head.all.get(name);
+      const info = (inHead ?? inBase)!;
 
       const status: ChangeStatus =
         inBase && inHead ? "modified" : inHead ? "added" : "removed";
@@ -48,7 +53,7 @@ export class TsMorphAdapter implements SymbolParserPort {
       results.push({
         file: filePath,
         name,
-        kind: (inHead ?? inBase!).kind,
+        kind: info.kind,
         status,
         baseRange: inBase?.range ?? null,
         headRange: inHead?.range ?? null,
@@ -58,8 +63,8 @@ export class TsMorphAdapter implements SymbolParserPort {
     // Top-level changes: only emit when there are no named hits in this file,
     // to avoid noise from import/decorator lines changing alongside methods.
     if (results.length === 0) {
-      const hasBaseTopLevel = baseSymbols.topLevelCount > 0;
-      const hasHeadTopLevel = headSymbols.topLevelCount > 0;
+      const hasBaseTopLevel = base.topLevelCount > 0;
+      const hasHeadTopLevel = head.topLevelCount > 0;
 
       if (hasBaseTopLevel || hasHeadTopLevel) {
         const status: ChangeStatus =
@@ -87,37 +92,34 @@ export class TsMorphAdapter implements SymbolParserPort {
 // AST helpers
 // ---------------------------------------------------------------------------
 
-function collectSymbols(
-  source: string | null,
-  lines: Set<number>
-): SymbolCollection {
-  if (!source || lines.size === 0) {
-    return { named: new Map(), topLevelCount: 0 };
-  }
+function analyzeSide(source: string | null, lines: Set<number>): SideAnalysis {
+  const result: SideAnalysis = {
+    all: new Map(),
+    touched: new Set(),
+    topLevelCount: 0,
+  };
+  if (!source) return result;
 
   const project = new Project({ useInMemoryFileSystem: true });
   const sourceFile = project.createSourceFile("__analysis__.ts", source);
 
-  const named = new Map<string, SymbolInfo>();
-  let topLevelCount = 0;
-
-  for (const line of lines) {
-    const sym = findSymbolAtLine(sourceFile, line);
-    if (sym) {
-      if (!named.has(sym.name)) named.set(sym.name, sym);
-    } else {
-      topLevelCount++;
-    }
+  const symbols = listSymbols(sourceFile);
+  for (const sym of symbols) {
+    if (!result.all.has(sym.name)) result.all.set(sym.name, sym);
   }
 
-  return { named, topLevelCount };
+  for (const line of lines) {
+    const sym = innermostAtLine(symbols, line);
+    if (sym) result.touched.add(sym.name);
+    else result.topLevelCount++;
+  }
+
+  return result;
 }
 
-function findSymbolAtLine(
-  sourceFile: SourceFile,
-  line: number
-): SymbolInfo | null {
-  let best: { info: SymbolInfo; size: number } | undefined;
+/** Collect every named function / method / class / arrow-variable in the file. */
+function listSymbols(sourceFile: SourceFile): SymbolInfo[] {
+  const symbols: SymbolInfo[] = [];
 
   function visit(node: Node): void {
     let kind: SymbolKind | null = null;
@@ -145,21 +147,31 @@ function findSymbolAtLine(
     }
 
     if (kind !== null && name !== null) {
-      const start = node.getStartLineNumber();
-      const end = node.getEndLineNumber();
-      if (start <= line && line <= end) {
-        const size = end - start;
-        if (!best || size < best.size) {
-          best = { info: { name, kind, range: { start, end } }, size };
-        }
-      }
+      symbols.push({
+        name,
+        kind,
+        range: { start: node.getStartLineNumber(), end: node.getEndLineNumber() },
+      });
     }
 
     node.forEachChild(visit);
   }
 
   visit(sourceFile);
-  return best?.info ?? null;
+  return symbols;
+}
+
+/** Smallest symbol whose range contains the line, or null if none does. */
+function innermostAtLine(symbols: SymbolInfo[], line: number): SymbolInfo | null {
+  let best: SymbolInfo | null = null;
+  for (const sym of symbols) {
+    if (sym.range.start <= line && line <= sym.range.end) {
+      if (!best || sym.range.end - sym.range.start < best.range.end - best.range.start) {
+        best = sym;
+      }
+    }
+  }
+  return best;
 }
 
 function buildMethodName(node: Node): string {

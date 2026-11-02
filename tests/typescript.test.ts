@@ -72,6 +72,42 @@ describe("TypeScript symbol analysis", () => {
     expect(byName["Calculator.divide"].headRange).not.toBeNull();
   });
 
+  it("marks an existing function as modified when lines are only added", () => {
+    repo = createFixtureRepo();
+    repo.write("src/svc.ts", `export function update(id: number) {\n  return id;\n}\n`);
+    repo.commit("initial");
+
+    repo.write(
+      "src/svc.ts",
+      `export function update(id: number) {\n  if (id < 0) throw new Error("bad");\n  return id;\n}\n`
+    );
+    repo.commit("add guard");
+
+    const result = makeAnalyzer(repo.dir).execute("HEAD~1", "HEAD");
+    const sym = result.symbols.find((s) => s.name === "update");
+
+    expect(sym!.status).toBe("modified");
+    expect(sym!.baseRange).not.toBeNull();
+    expect(sym!.headRange).not.toBeNull();
+  });
+
+  it("marks an existing function as modified when lines are only removed", () => {
+    repo = createFixtureRepo();
+    repo.write(
+      "src/svc.ts",
+      `export function update(id: number) {\n  console.log(id);\n  return id;\n}\n`
+    );
+    repo.commit("initial");
+
+    repo.write("src/svc.ts", `export function update(id: number) {\n  return id;\n}\n`);
+    repo.commit("drop log");
+
+    const result = makeAnalyzer(repo.dir).execute("HEAD~1", "HEAD");
+    const sym = result.symbols.find((s) => s.name === "update");
+
+    expect(sym!.status).toBe("modified");
+  });
+
   it("marks a deleted function as removed", () => {
     repo = createFixtureRepo();
     repo.write("src/utils.ts", `export function greet(name: string): string {\n  return 'Hello ' + name;\n}\n`);
