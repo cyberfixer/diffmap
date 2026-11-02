@@ -1,6 +1,17 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { createFixtureRepo, type FixtureRepo } from "./fixtures/repo.js";
-import { analyzeRange } from "../src/analyzer/index.js";
+import { AnalyzeRangeUseCase } from "../src/application/use-cases/analyze-range.js";
+import { GitDiffReader } from "../src/infrastructure/git/git-diff-reader.js";
+import { GitSourceReader } from "../src/infrastructure/git/git-source-reader.js";
+import { TsMorphAdapter } from "../src/infrastructure/parsers/typescript/ts-morph.adapter.js";
+
+function makeAnalyzer(cwd: string) {
+  return new AnalyzeRangeUseCase(
+    new GitDiffReader(cwd),
+    new GitSourceReader(cwd),
+    [new TsMorphAdapter()],
+  );
+}
 
 let repo: FixtureRepo | null = null;
 
@@ -38,7 +49,7 @@ export class Calculator {
 `;
 
 describe("TypeScript symbol analysis", () => {
-  it("detects modified functions and methods", async () => {
+  it("detects modified functions and methods", () => {
     repo = createFixtureRepo();
     repo.write("src/calc.ts", V1);
     repo.commit("initial");
@@ -46,11 +57,8 @@ describe("TypeScript symbol analysis", () => {
     repo.write("src/calc.ts", V2);
     repo.commit("modify add and multiply, add divide");
 
-    const result = await analyzeRange("HEAD~1", "HEAD", repo.dir);
-
-    const byName = Object.fromEntries(
-      result.symbols.map((s) => [s.name, s])
-    );
+    const result = makeAnalyzer(repo.dir).execute("HEAD~1", "HEAD");
+    const byName = Object.fromEntries(result.symbols.map((s) => [s.name, s]));
 
     expect(byName["add"].status).toBe("modified");
     expect(byName["add"].kind).toBe("function");
@@ -64,7 +72,7 @@ describe("TypeScript symbol analysis", () => {
     expect(byName["Calculator.divide"].headRange).not.toBeNull();
   });
 
-  it("marks a deleted function as removed", async () => {
+  it("marks a deleted function as removed", () => {
     repo = createFixtureRepo();
     repo.write("src/utils.ts", `export function greet(name: string): string {\n  return 'Hello ' + name;\n}\n`);
     repo.commit("initial");
@@ -72,7 +80,7 @@ describe("TypeScript symbol analysis", () => {
     repo.write("src/utils.ts", `// greet removed\n`);
     repo.commit("remove greet");
 
-    const result = await analyzeRange("HEAD~1", "HEAD", repo.dir);
+    const result = makeAnalyzer(repo.dir).execute("HEAD~1", "HEAD");
     const greet = result.symbols.find((s) => s.name === "greet");
 
     expect(greet).toBeDefined();
@@ -80,16 +88,15 @@ describe("TypeScript symbol analysis", () => {
     expect(greet!.headRange).toBeNull();
   });
 
-  it("marks a new file's function as added", async () => {
+  it("marks a new file's function as added", () => {
     repo = createFixtureRepo();
-    // Need an initial commit so HEAD~1 exists
     repo.write("README.md", "# gitmap\n");
     repo.commit("initial");
 
     repo.write("src/new.ts", `export function newThing(): void {\n  console.log('hello');\n}\n`);
     repo.commit("add new file");
 
-    const result = await analyzeRange("HEAD~1", "HEAD", repo.dir);
+    const result = makeAnalyzer(repo.dir).execute("HEAD~1", "HEAD");
     const newThing = result.symbols.find((s) => s.name === "newThing");
 
     expect(newThing).toBeDefined();
@@ -97,7 +104,7 @@ describe("TypeScript symbol analysis", () => {
     expect(newThing!.baseRange).toBeNull();
   });
 
-  it("captures top-level changes outside any symbol", async () => {
+  it("captures top-level changes outside any symbol", () => {
     repo = createFixtureRepo();
     repo.write("src/config.ts", `export const VERSION = '1.0.0';\n`);
     repo.commit("initial");
@@ -105,7 +112,7 @@ describe("TypeScript symbol analysis", () => {
     repo.write("src/config.ts", `export const VERSION = '2.0.0';\n`);
     repo.commit("bump version");
 
-    const result = await analyzeRange("HEAD~1", "HEAD", repo.dir);
+    const result = makeAnalyzer(repo.dir).execute("HEAD~1", "HEAD");
     const topLevel = result.symbols.find((s) => s.kind === "top-level");
 
     expect(topLevel).toBeDefined();

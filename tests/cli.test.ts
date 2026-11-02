@@ -1,6 +1,17 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { createFixtureRepo, type FixtureRepo } from "./fixtures/repo.js";
-import { analyzeRange } from "../src/analyzer/index.js";
+import { AnalyzeRangeUseCase } from "../src/application/use-cases/analyze-range.js";
+import { GitDiffReader } from "../src/infrastructure/git/git-diff-reader.js";
+import { GitSourceReader } from "../src/infrastructure/git/git-source-reader.js";
+import { TsMorphAdapter } from "../src/infrastructure/parsers/typescript/ts-morph.adapter.js";
+
+function makeAnalyzer(cwd: string) {
+  return new AnalyzeRangeUseCase(
+    new GitDiffReader(cwd),
+    new GitSourceReader(cwd),
+    [new TsMorphAdapter()],
+  );
+}
 
 let repo: FixtureRepo | null = null;
 
@@ -9,27 +20,20 @@ afterEach(() => {
   repo = null;
 });
 
-describe("analyzeRange output shape", () => {
-  it("returns valid AnalysisResult JSON", async () => {
+describe("AnalyzeRangeUseCase output shape", () => {
+  it("returns valid AnalysisResult JSON", () => {
     repo = createFixtureRepo();
-    repo.write(
-      "src/math.ts",
-      `export function square(n: number): number {\n  return n * n;\n}\n`
-    );
+    repo.write("src/math.ts", `export function square(n: number): number {\n  return n * n;\n}\n`);
     repo.commit("initial");
 
-    repo.write(
-      "src/math.ts",
-      `export function square(n: number): number {\n  return n ** 2;\n}\n`
-    );
+    repo.write("src/math.ts", `export function square(n: number): number {\n  return n ** 2;\n}\n`);
     repo.commit("use ** operator");
 
-    const result = await analyzeRange("HEAD~1", "HEAD", repo.dir);
+    const result = makeAnalyzer(repo.dir).execute("HEAD~1", "HEAD");
 
-    // Shape checks
     expect(typeof result.base).toBe("string");
     expect(typeof result.head).toBe("string");
-    expect(result.base).toHaveLength(40); // full SHA
+    expect(result.base).toHaveLength(40);
     expect(result.head).toHaveLength(40);
     expect(Array.isArray(result.symbols)).toBe(true);
 
@@ -46,7 +50,7 @@ describe("analyzeRange output shape", () => {
     expect(sym.baseRange!.end).toBeGreaterThanOrEqual(sym.baseRange!.start);
   });
 
-  it("ignores non-TypeScript files", async () => {
+  it("ignores non-TypeScript files", () => {
     repo = createFixtureRepo();
     repo.write("README.md", "# initial\n");
     repo.commit("initial");
@@ -54,25 +58,19 @@ describe("analyzeRange output shape", () => {
     repo.write("README.md", "# updated\n");
     repo.commit("update readme");
 
-    const result = await analyzeRange("HEAD~1", "HEAD", repo.dir);
+    const result = makeAnalyzer(repo.dir).execute("HEAD~1", "HEAD");
     expect(result.symbols).toHaveLength(0);
   });
 
-  it("handles arrow functions assigned to variables", async () => {
+  it("handles arrow functions assigned to variables", () => {
     repo = createFixtureRepo();
-    repo.write(
-      "src/arrows.ts",
-      `export const double = (n: number): number => n * 2;\n`
-    );
+    repo.write("src/arrows.ts", `export const double = (n: number): number => n * 2;\n`);
     repo.commit("initial");
 
-    repo.write(
-      "src/arrows.ts",
-      `export const double = (n: number): number => n + n;\n`
-    );
+    repo.write("src/arrows.ts", `export const double = (n: number): number => n + n;\n`);
     repo.commit("change double impl");
 
-    const result = await analyzeRange("HEAD~1", "HEAD", repo.dir);
+    const result = makeAnalyzer(repo.dir).execute("HEAD~1", "HEAD");
     const sym = result.symbols.find((s) => s.name === "double");
 
     expect(sym).toBeDefined();

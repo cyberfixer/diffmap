@@ -1,20 +1,11 @@
 import parseDiff from "parse-diff";
+import type { FileChange } from "../../../domain/file-change.js";
 
-const TS_EXTENSIONS = /\.(tsx?)$/;
-
-export interface FileChange {
-  /** Repo-relative path (use headPath when available, else basePath). */
-  path: string;
-  basePath: string | null; // null for new files
-  headPath: string | null; // null for deleted files
-  /** Line numbers in the base revision that were removed. */
-  removedLines: Set<number>;
-  /** Line numbers in the head revision that were added. */
-  addedLines: Set<number>;
-}
-
-/** Parse a unified diff string and return only TypeScript file changes. */
-export function parseTsDiff(diffText: string): FileChange[] {
+/**
+ * Parse a raw unified diff string into FileChange value objects.
+ * All file types are returned — language filtering is the use case's job.
+ */
+export function parseDiffText(diffText: string): FileChange[] {
   const files = parseDiff(diffText);
   const result: FileChange[] = [];
 
@@ -28,8 +19,6 @@ export function parseTsDiff(diffText: string): FileChange[] {
     const basePath = isNew ? null : from;
     const headPath = isDeleted ? null : to;
     const path = headPath ?? basePath ?? "";
-
-    if (!TS_EXTENSIONS.test(path)) continue;
 
     const addedLines = new Set<number>();
     const removedLines = new Set<number>();
