@@ -1,4 +1,5 @@
 import type { AnalysisResult } from "../../domain/analysis-result.js";
+import type { FileView } from "../../domain/file-view.js";
 import type { GraphNode } from "../../domain/graph.js";
 import type { DiffLine } from "../../domain/symbol.js";
 import { layoutWindows, MARGIN, type WindowSpec } from "./layout.js";
@@ -11,91 +12,118 @@ const expandTabs = (s: string): string => s.replace(/\t/g, "  ");
 // Rough monospace character widths (px) used only to size windows to their code.
 const CODE_CHAR = 7.4;
 const NAME_CHAR = 7.8;
-const CODE_GUTTER = 80; // line-number column, sign column and padding
+const CODE_GUTTER = 96; // line number, dot and sign columns plus padding
 const MIN_W = 360;
 const MAX_W = 760;
+/** Unchanged lines within this distance of a change stay visible in "only changes" mode. */
+const NEAR = 3;
 
-const dedupeKey = (l: DiffLine): string => `${l.type}:${l.oldLine}:${l.newLine}`;
-
-/**
- * A class's own diff range contains the diffs of its methods. Show only the
- * lines that belong to no other changed symbol in the same file, so code
- * appears once.
- */
-function ownDiff(node: GraphNode, diff: DiffLine[], siblings: GraphNode[], diffs: Map<string, DiffLine[]>): DiffLine[] {
-  if (node.kind !== "class") return diff;
-  const claimed = new Set<string>();
-  for (const sib of siblings) {
-    if (sib.id === node.id || !sib.changed || sib.kind === "class") continue;
-    for (const l of diffs.get(sib.id) ?? []) claimed.add(dedupeKey(l));
-  }
-  const rest = diff.filter((l) => !claimed.has(dedupeKey(l)));
-  return rest.some((l) => l.type !== "ctx") ? rest : [];
-}
-
-function renderDiff(lines: DiffLine[]): string {
-  const rows = lines.map((l) => {
-    const sign = l.type === "add" ? "+" : l.type === "del" ? "-" : " ";
-    const num = l.type === "del" ? l.oldLine : l.newLine;
-    return `<div class="dl ${l.type}"><span class="ln">${num ?? ""}</span><span class="sg">${sign}</span><span class="tx">${esc(expandTabs(l.text))}</span></div>`;
-  });
-  return `<div class="diff">${rows.join("")}</div>`;
-}
-
-function renderSymbol(n: GraphNode, idx: number, diff: DiffLine[]): string {
-  const badge = n.changed ? `<span class="badge">${n.status}</span>` : "";
-  // Decorators collapse into one faint inline hint instead of their own row of chips.
-  const deco = n.labels.length
-    ? `<span class="deco" title="${esc(n.labels.join(" "))}">${esc(n.labels.join(" "))}</span>`
-    : "";
-  const cls = n.changed ? `sym changed ${n.status}` : "sym context";
-  const body = n.changed && diff.length > 0 ? renderDiff(diff) : "";
-  return `<div class="${cls}" id="s${idx}" data-s="${idx}">
-    <div class="srow">${badge}<span class="name" title="${esc(n.name)}">${esc(n.name)}</span>${deco}</div>${body}
-  </div>`;
-}
-
-function windowWidth(nodes: GraphNode[], diffs: Map<string, DiffLine[]>): number {
+function windowWidth(view: FileView | undefined, nodes: GraphNode[]): number {
   let w = 0;
-  for (const n of nodes) {
-    const nameW = n.name.length * NAME_CHAR + (n.changed ? 110 : 40);
-    w = Math.max(w, nameW);
-    if (n.changed) {
-      for (const l of diffs.get(n.id) ?? []) {
-        w = Math.max(w, expandTabs(l.text).length * CODE_CHAR + CODE_GUTTER);
-      }
-    }
+  for (const n of nodes) w = Math.max(w, n.name.length * NAME_CHAR + 70);
+  for (const l of view?.lines ?? []) {
+    w = Math.max(w, expandTabs(l.text).length * CODE_CHAR + CODE_GUTTER);
   }
   return Math.round(Math.min(MAX_W, Math.max(MIN_W, w)));
 }
 
-function edgeClass(kind: string, hot: boolean): string {
-  return kind === "calls-removed" ? "edge removed-call" : hot ? "edge hot" : "edge";
+interface Row {
+  line: DiffLine;
+  anchors: number[]; // indexes of graph nodes that start on this row
+}
+
+/** Find the row where a symbol starts (deleted symbols start on a deleted row). */
+function rowFor(rows: Row[], n: GraphNode): number {
+  const want = n.status === "removed" ? "del" : null;
+  const idx = rows.findIndex((r) =>
+    want
+      ? r.line.type === "del" && r.line.oldLine === n.line
+      : r.line.type !== "del" && r.line.newLine === n.line
+  );
+  return idx >= 0 ? idx : 0;
+}
+
+function renderCode(rows: Row[], connected: Set<number>): string {
+  // Mark which rows stay visible in "only changes" mode.
+  const near = new Array<boolean>(rows.length).fill(false);
+  rows.forEach((r, i) => {
+    const keep = r.line.type !== "ctx" || r.anchors.some((a) => connected.has(a));
+    if (!keep) return;
+    for (let j = Math.max(0, i - NEAR); j <= Math.min(rows.length - 1, i + NEAR); j++) near[j] = true;
+  });
+
+  const out: string[] = [];
+  let i = 0;
+  while (i < rows.length) {
+    if (!near[i]) {
+      let j = i;
+      while (j < rows.length && !near[j]) j++;
+      out.push(`<div class="dl gap">⋯ ${j - i} unchanged line${j - i === 1 ? "" : "s"}</div>`);
+      for (; i < j; i++) out.push(renderRow(rows[i], connected, true));
+      continue;
+    }
+    out.push(renderRow(rows[i], connected, false));
+    i++;
+  }
+  return `<div class="code">${out.join("")}</div>`;
+}
+
+function renderRow(r: Row, connected: Set<number>, far: boolean): string {
+  const l = r.line;
+  const sign = l.type === "add" ? "+" : l.type === "del" ? "-" : " ";
+  const num = l.type === "del" ? l.oldLine : l.newLine;
+  const live = r.anchors.filter((a) => connected.has(a));
+  const cls = ["dl", l.type, far ? "far" : "", live.length ? "anchor" : ""].filter(Boolean).join(" ");
+  const id = r.anchors.length ? ` id="s${r.anchors[0]}"` : "";
+  const ss = live.length ? ` data-ss="${live.join(" ")}"` : "";
+  const aliases = r.anchors
+    .slice(1)
+    .map((a) => `<span class="alias" id="s${a}"></span>`)
+    .join("");
+  return `<div class="${cls}"${id}${ss}><span class="ln">${num ?? ""}</span><span class="dot"></span><span class="sg">${sign}</span><span class="tx">${esc(expandTabs(l.text))}${aliases}</span></div>`;
+}
+
+/** Context-only files (unchanged callers/callees) stay compact: names only. */
+function renderCompact(nodes: GraphNode[], idx: Map<string, number>, connected: Set<number>): string {
+  return nodes
+    .map((n) => {
+      const i = idx.get(n.id)!;
+      const deco = n.labels.length
+        ? `<span class="deco" title="${esc(n.labels.join(" "))}">${esc(n.labels.join(" "))}</span>`
+        : "";
+      const hover = connected.has(i) ? ` data-ss="${i}"` : "";
+      return `<div class="sym${connected.has(i) ? " anchor" : ""}" id="s${i}"${hover}><div class="srow"><span class="name" title="${esc(n.name)}">${esc(n.name)}</span>${deco}</div></div>`;
+    })
+    .join("\n");
 }
 
 /** Render an AnalysisResult as one self-contained, interactive HTML map. */
 export function renderHtml(result: AnalysisResult): string {
-  const diffs = new Map<string, DiffLine[]>(result.symbols.map((s) => [s.id, s.diff]));
   const symIndex = new Map(result.nodes.map((n, i) => [n.id, i]));
+  const views = new Map<string, FileView>((result.files ?? []).map((f) => [f.path, f]));
 
-  // One window per file.
-  const files = new Map<string, GraphNode[]>();
+  const connected = new Set<number>();
+  for (const e of result.edges) {
+    const a = symIndex.get(e.from);
+    const b = symIndex.get(e.to);
+    if (a !== undefined && b !== undefined) {
+      connected.add(a);
+      connected.add(b);
+    }
+  }
+
+  const nodesByFile = new Map<string, GraphNode[]>();
   for (const n of result.nodes) {
-    const list = files.get(n.file) ?? [];
+    const list = nodesByFile.get(n.file) ?? [];
     list.push(n);
-    files.set(n.file, list);
+    nodesByFile.set(n.file, list);
   }
-  const fileIds = [...files.keys()].sort();
+  const fileIds = [...new Set([...nodesByFile.keys(), ...views.keys()])].sort();
   const winIdx = new Map(fileIds.map((f, i) => [f, i]));
-
-  const shown = new Map<string, DiffLine[]>();
-  for (const n of result.nodes) {
-    shown.set(n.id, ownDiff(n, diffs.get(n.id) ?? [], files.get(n.file)!, diffs));
-  }
 
   const specs: WindowSpec[] = fileIds.map((f) => ({
     id: f,
-    width: windowWidth(files.get(f)!, shown),
+    width: windowWidth(views.get(f), views.has(f) ? [] : nodesByFile.get(f) ?? []),
   }));
   const fileEdges = result.edges.flatMap((e) => {
     const a = result.nodes[symIndex.get(e.from) ?? -1];
@@ -104,19 +132,36 @@ export function renderHtml(result: AnalysisResult): string {
   });
   const layout = layoutWindows(specs, fileEdges);
 
+  let addedLines = 0;
+  let removedLines = 0;
+
   const windowsHtml = fileIds
     .map((file) => {
-      const nodes = [...files.get(file)!].sort((a, b) => a.line - b.line || a.name.localeCompare(b.name));
+      const view = views.get(file);
+      const nodes = [...(nodesByFile.get(file) ?? [])].sort(
+        (a, b) => a.line - b.line || a.name.localeCompare(b.name)
+      );
       const p = layout.placed.get(file)!;
       const slash = file.lastIndexOf("/");
       const dir = slash >= 0 ? file.slice(0, slash + 1) : "";
       const base = file.slice(slash + 1);
-      const changedCount = nodes.filter((n) => n.changed).length;
-      const meta = changedCount ? `${changedCount} changed` : "context";
-      const body = nodes
-        .map((n) => renderSymbol(n, symIndex.get(n.id)!, shown.get(n.id) ?? []))
-        .join("\n");
-      return `<section class="win ${changedCount ? "has-change" : "ctx-only"}" id="w${winIdx.get(file)}" data-col="${p.col}" data-order="${p.order}" style="left:${p.x}px;width:${p.width}px">
+
+      let meta = "context";
+      let body: string;
+      if (view) {
+        const rows: Row[] = view.lines.map((line) => ({ line, anchors: [] }));
+        for (const n of nodes) rows[rowFor(rows, n)]?.anchors.push(symIndex.get(n.id)!);
+        const add = view.lines.filter((l) => l.type === "add").length;
+        const del = view.lines.filter((l) => l.type === "del").length;
+        addedLines += add;
+        removedLines += del;
+        meta = `<span class="m-add">+${add}</span> <span class="m-del">−${del}</span>`;
+        body = renderCode(rows, connected);
+      } else {
+        body = renderCompact(nodes, symIndex, connected);
+      }
+
+      return `<section class="win ${view ? "has-change" : "ctx-only"}" id="w${winIdx.get(file)}" data-col="${p.col}" data-order="${p.order}" style="left:${p.x}px;width:${p.width}px">
   <header class="wh"><span class="fname">${esc(base)}</span><span class="fdir">${esc(dir)}</span><span class="fmeta">${meta}</span></header>
   ${body}
 </section>`;
@@ -127,21 +172,19 @@ export function renderHtml(result: AnalysisResult): string {
     .filter((e) => symIndex.has(e.from) && symIndex.has(e.to))
     .map((e) => {
       const hot = result.nodes[symIndex.get(e.from)!].changed || result.nodes[symIndex.get(e.to)!].changed;
+      const cls = e.kind === "calls-removed" ? "edge removed-call" : hot ? "edge hot" : "edge";
       const marker = e.kind === "calls-removed" ? "arrow-red" : "arrow";
-      return `<path class="${edgeClass(e.kind, hot)}" data-from="${symIndex.get(e.from)}" data-to="${symIndex.get(e.to)}" marker-end="url(#${marker})"/>`;
+      return `<path class="${cls}" data-from="${symIndex.get(e.from)}" data-to="${symIndex.get(e.to)}" marker-end="url(#${marker})"/>`;
     })
     .join("\n");
 
-  const count = (s: string): number => result.nodes.filter((n) => n.status === s).length;
-  const neighbours = result.nodes.filter((n) => !n.changed).length;
+  const changedSymbols = result.nodes.filter((n) => n.changed).length;
   const broken = result.edges.filter((e) => e.kind === "calls-removed").length;
   const warning = broken
     ? `<div class="warn">⚠ ${broken === 1 ? "1 call still points" : broken + " calls still point"} at removed code (red dashed arrows)</div>`
     : "";
   const empty =
-    result.nodes.length === 0
-      ? `<p class="empty">No changed TypeScript symbols in this range.</p>`
-      : "";
+    fileIds.length === 0 ? `<p class="empty">No changed TypeScript files in this range.</p>` : "";
 
   return `<!doctype html>
 <html lang="en">
@@ -151,12 +194,12 @@ export function renderHtml(result: AnalysisResult): string {
 <title>gitmap ${esc(result.base.slice(0, 7))}..${esc(result.head.slice(0, 7))}</title>
 <style>
   :root { --bg:#ffffff; --fg:#1f2328; --muted:#656d76; --card:#f6f8fa; --line:#d0d7de; --edge:#8c959f;
-          --added:#1a7f37; --removed:#cf222e; --modified:#9a6700;
-          --add-bg:#dafbe1; --del-bg:#ffebe9; }
+          --added:#1a7f37; --removed:#cf222e;
+          --add-bg:#dafbe1; --add-ln:#aceebb; --del-bg:#ffebe9; --del-ln:#ffcecb; }
   @media (prefers-color-scheme: dark) {
     :root { --bg:#0d1117; --fg:#e6edf3; --muted:#8b949e; --card:#161b22; --line:#30363d; --edge:#6e7681;
-            --added:#3fb950; --removed:#f85149; --modified:#d29922;
-            --add-bg:#12301a; --del-bg:#3d1518; }
+            --added:#3fb950; --removed:#f85149;
+            --add-bg:#12301a; --add-ln:#1b4a28; --del-bg:#3d1518; --del-ln:#5c1f24; }
   }
   * { box-sizing:border-box; }
   html, body { margin:0; height:100%; background:var(--bg); color:var(--fg); font:14px/1.4 system-ui,sans-serif; }
@@ -164,13 +207,15 @@ export function renderHtml(result: AnalysisResult): string {
                align-items:center; padding:10px 16px; background:var(--bg); border-bottom:1px solid var(--line); }
   header.top h1 { font-size:15px; margin:0; }
   .meta { color:var(--muted); font:12px ui-monospace,monospace; }
-  .pill { padding:2px 10px; border:1px solid var(--line); border-radius:999px; font-size:12px; }
-  .pill b { color:var(--c, var(--fg)); }
-  .pill.added { --c:var(--added); } .pill.modified { --c:var(--modified); } .pill.removed { --c:var(--removed); }
+  .legend { display:flex; gap:12px; font-size:12px; color:var(--muted); align-items:center; }
+  .sw { display:inline-block; width:12px; height:12px; border-radius:3px; vertical-align:-2px; margin-right:4px; }
+  .sw.add { background:var(--add-bg); border:1px solid var(--added); }
+  .sw.del { background:var(--del-bg); border:1px solid var(--removed); }
   .hint { color:var(--muted); font-size:12px; margin-left:auto; }
   .warn { width:100%; color:var(--removed); font-weight:600; font-size:13px; }
   .tools button { border:1px solid var(--line); background:var(--card); color:var(--fg); border-radius:6px;
                   padding:2px 10px; cursor:pointer; font-size:13px; }
+  .tools button.on { background:var(--fg); color:var(--bg); }
   #vp { position:fixed; inset:0; overflow:hidden; cursor:grab; touch-action:none; }
   #vp.drag { cursor:grabbing; }
   #cv { position:absolute; left:0; top:0; transform-origin:0 0; width:${layout.width}px; }
@@ -187,26 +232,27 @@ export function renderHtml(result: AnalysisResult): string {
   .fname { font:700 13px ui-monospace,monospace; flex:none; }
   .fdir { color:var(--muted); font:11px ui-monospace,monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; direction:rtl; text-align:left; min-width:0; }
   .fmeta { margin-left:auto; color:var(--muted); font-size:11px; flex:none; }
-  .sym { border-top:1px solid var(--line); }
-  .wh + .sym { border-top:0; }
-  .srow { display:flex; align-items:baseline; gap:8px; padding:6px 12px; cursor:default; min-width:0; }
-  .sym.changed > .srow { cursor:pointer; border-left:4px solid var(--c); }
-  .sym.changed.added { --c:var(--added); } .sym.changed.modified { --c:var(--modified); } .sym.changed.removed { --c:var(--removed); }
-  .sym.context > .srow { padding-left:16px; color:var(--muted); }
-  .name { font:600 13px ui-monospace,monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:none; max-width:100%; }
-  .sym.context .name { font-weight:500; }
-  .badge { font-size:10px; text-transform:uppercase; font-weight:700; color:#fff; background:var(--c);
-           padding:1px 6px; border-radius:4px; flex:none; }
-  .deco { color:var(--muted); opacity:.75; font:11px ui-monospace,monospace; overflow:hidden;
-          text-overflow:ellipsis; white-space:nowrap; min-width:0; }
-  .diff { padding:6px 0; background:var(--bg); border-top:1px solid var(--line); }
-  .sym.collapsed .diff { display:none; }
-  .dl { display:flex; font:12px/17px ui-monospace,monospace; }
+  .m-add { color:var(--added); font-weight:600; } .m-del { color:var(--removed); font-weight:600; }
+  .code { padding:4px 0; background:var(--bg); }
+  .dl { display:flex; font:12px/17px ui-monospace,monospace; min-height:17px; }
   .dl.add { background:var(--add-bg); } .dl.del { background:var(--del-bg); }
-  .ln { width:40px; text-align:right; padding-right:8px; color:var(--muted); flex:none; user-select:none; }
-  .sg { width:14px; flex:none; user-select:none; }
+  .ln { width:44px; text-align:right; padding-right:6px; color:var(--muted); flex:none; user-select:none; }
+  .dl.add .ln { background:var(--add-ln); } .dl.del .ln { background:var(--del-ln); }
+  .dot { width:12px; flex:none; text-align:center; font-size:8px; line-height:17px; color:var(--edge); user-select:none; }
+  .dl.anchor .dot::before { content:"●"; }
+  .dl.anchor { cursor:default; }
+  .sg { width:12px; flex:none; user-select:none; }
   .dl.add .sg { color:var(--added); } .dl.del .sg { color:var(--removed); }
   .tx { white-space:pre-wrap; overflow-wrap:anywhere; min-width:0; flex:1; padding-right:10px; }
+  .alias { display:inline-block; width:0; height:0; }
+  .dl.gap { display:none; color:var(--muted); padding-left:62px; font-style:italic; background:var(--card); }
+  body.only .dl.gap { display:flex; }
+  body.only .dl.far { display:none; }
+  .sym { border-top:1px solid var(--line); }
+  .wh + .sym { border-top:0; }
+  .srow { display:flex; align-items:baseline; gap:8px; padding:6px 12px 6px 16px; min-width:0; color:var(--muted); }
+  .name { font:500 13px ui-monospace,monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:none; max-width:100%; }
+  .deco { opacity:.75; font:11px ui-monospace,monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
   .dim { opacity:.18 !important; }
   .empty { position:fixed; top:120px; left:0; right:0; text-align:center; color:var(--muted); }
 </style>
@@ -215,12 +261,13 @@ export function renderHtml(result: AnalysisResult): string {
 <header class="top">
   <h1>gitmap</h1>
   <span class="meta">${esc(result.base.slice(0, 10))} → ${esc(result.head.slice(0, 10))}</span>
-  <span class="pill added"><b>${count("added")}</b> added</span>
-  <span class="pill modified"><b>${count("modified")}</b> modified</span>
-  <span class="pill removed"><b>${count("removed")}</b> removed</span>
-  <span class="pill"><b>${neighbours}</b> neighbours</span>
-  <span class="tools"><button id="fit">Fit</button> <button id="zin">+</button> <button id="zout">−</button></span>
-  <span class="hint">one window per file · arrow = “calls” · drag to pan · scroll to zoom · click a changed symbol to fold its diff · hover to trace</span>
+  <span class="legend">
+    <span><span class="sw add"></span>added · <b>${addedLines}</b> lines</span>
+    <span><span class="sw del"></span>removed · <b>${removedLines}</b> lines</span>
+    <span>${[...views.keys()].length} files · ${changedSymbols} symbols changed</span>
+  </span>
+  <span class="tools"><button id="only">Only changes</button> <button id="fit">Fit</button> <button id="zin">+</button> <button id="zout">−</button></span>
+  <span class="hint">whole files · ● = linked symbol, hover to trace · drag to pan · scroll to zoom</span>
   ${warning}
 </header>
 <div id="vp">
@@ -260,10 +307,11 @@ ${empty}
     cv.style.height = H + 'px'; sv.setAttribute('height', H);
   }
 
+  // Edge end point: first line of the row (code rows) or middle of the name row (compact).
   function anchor(idx, right) {
-    var el = document.getElementById('s' + idx), win = el.closest('.win'), row = el.querySelector('.srow');
-    return { x: win.offsetLeft + (right ? win.offsetWidth : 0), y: win.offsetTop + el.offsetTop + row.offsetHeight / 2,
-             win: win };
+    var el = document.getElementById('s' + idx), r = el.closest('.dl, .sym'), win = el.closest('.win');
+    var h = r.classList.contains('dl') ? 9 : r.querySelector('.srow').offsetHeight / 2;
+    return { x: win.offsetLeft + (right ? win.offsetWidth : 0), y: win.offsetTop + r.offsetTop + h, win: win };
   }
 
   function draw() {
@@ -296,32 +344,27 @@ ${empty}
   }, { passive: false });
   var drag = null;
   vp.addEventListener('pointerdown', function (e) {
-    if (e.target.closest('.diff')) return;
-    drag = { x: e.clientX - tx, y: e.clientY - ty, moved: false };
+    if (e.target.closest('.tx')) return;   // let people select code
+    drag = { x: e.clientX - tx, y: e.clientY - ty };
     vp.classList.add('drag');
   });
   window.addEventListener('pointermove', function (e) {
     if (!drag) return;
-    drag.moved = true; tx = e.clientX - drag.x; ty = e.clientY - drag.y; apply();
+    tx = e.clientX - drag.x; ty = e.clientY - drag.y; apply();
   });
-  window.addEventListener('pointerup', function () { vp.classList.remove('drag'); setTimeout(function () { drag = null; }, 0); });
+  window.addEventListener('pointerup', function () { drag = null; vp.classList.remove('drag'); });
   document.getElementById('fit').onclick = fit;
   document.getElementById('zin').onclick = function () { zoom(1.2, vp.clientWidth / 2, vp.clientHeight / 2); };
   document.getElementById('zout').onclick = function () { zoom(1 / 1.2, vp.clientWidth / 2, vp.clientHeight / 2); };
+  var only = document.getElementById('only');
+  only.onclick = function () { document.body.classList.toggle('only'); only.classList.toggle('on'); relayout(); };
 
-  var syms = [].slice.call(document.querySelectorAll('.sym'));
-  syms.forEach(function (n) {
-    var row = n.querySelector('.srow');
-    if (n.classList.contains('changed') && n.querySelector('.diff')) {
-      row.addEventListener('click', function () {
-        if (drag && drag.moved) return;
-        n.classList.toggle('collapsed'); relayout();
-      });
-    }
+  [].slice.call(document.querySelectorAll('[data-ss]')).forEach(function (n) {
     n.addEventListener('mouseenter', function () {
-      var i = n.dataset.s, keep = {}; keep[i] = true;
+      var ids = n.dataset.ss.split(' '), keep = {};
+      ids.forEach(function (i) { keep[i] = true; });
       edges.forEach(function (e) {
-        var hit = e.dataset.from === i || e.dataset.to === i;
+        var hit = ids.indexOf(e.dataset.from) >= 0 || ids.indexOf(e.dataset.to) >= 0;
         if (hit) { keep[e.dataset.from] = true; keep[e.dataset.to] = true; }
         e.classList.toggle('dim', !hit);
       });

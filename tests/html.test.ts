@@ -3,7 +3,7 @@ import { renderHtml } from "../src/interfaces/html/render-html.js";
 import { layoutWindows } from "../src/interfaces/html/layout.js";
 import type { AnalysisResult } from "../src/domain/analysis-result.js";
 import type { GraphNode } from "../src/domain/graph.js";
-import type { ChangedSymbol, DiffLine } from "../src/domain/symbol.js";
+import type { DiffLine } from "../src/domain/symbol.js";
 
 const sha = (c: string) => c.repeat(40);
 
@@ -52,63 +52,33 @@ describe("layoutWindows", () => {
   });
 });
 
-const line = (type: DiffLine["type"], n: number, text: string): DiffLine => ({
+const row = (type: DiffLine["type"], n: number, text: string): DiffLine => ({
   type,
   oldLine: type === "add" ? null : n,
   newLine: type === "del" ? null : n,
   text,
 });
 
-const sym = (id: string, extra: Partial<ChangedSymbol>): ChangedSymbol => ({
-  id,
-  file: id.split("#")[0],
-  name: id.split("#")[1],
-  kind: "method",
-  status: "modified",
-  baseRange: { start: 1, end: 9 },
-  headRange: { start: 1, end: 9 },
-  diff: [],
-  ...extra,
-});
-
 describe("renderHtml", () => {
   const longLine = "  const veryLongVariableName = someFunction(argumentNumberOne, argumentNumberTwo, argumentNumberThree);";
+
+  // A 30-line file where only lines 4-5 changed.
+  const svcLines: DiffLine[] = [];
+  for (let i = 1; i <= 30; i++) svcLines.push(row("ctx", i, `// line ${i}`));
+  svcLines[3] = row("del", 4, "  return <em>old</em>;");
+  svcLines.splice(4, 0, row("add", 4, "  return 2;"));
+  svcLines[5] = row("add", 5, longLine);
 
   const result: AnalysisResult = {
     base: sha("a"),
     head: sha("b"),
-    symbols: [
-      sym("svc.ts#Svc.update", {
-        diff: [
-          line("ctx", 3, "update() {"),
-          line("del", 4, "  return 1;"),
-          line("add", 4, "  return <em>2</em>;"),
-          line("add", 5, longLine),
-        ],
-      }),
-      sym("svc.ts#Svc.create", {
-        diff: [line("add", 8, "  return 'new';")],
-      }),
-      // The class range contains both methods' lines plus its own decorator change.
-      sym("svc.ts#Svc", {
-        kind: "class",
-        diff: [
-          line("add", 1, "@Injectable()"),
-          line("add", 4, "  return <em>2</em>;"),
-          line("add", 8, "  return 'new';"),
-        ],
-      }),
-    ],
+    symbols: [],
+    files: [{ path: "svc.ts", status: "modified", lines: svcLines }],
     nodes: [
-      node("svc.ts#Svc", { changed: true, status: "modified", kind: "class", line: 1 }),
-      node("svc.ts#Svc.update", { changed: true, status: "modified", kind: "method", line: 3 }),
-      node("svc.ts#Svc.create", { changed: true, status: "modified", kind: "method", line: 8 }),
-      node("svc.ts#Svc.findOne", { kind: "method", line: 12 }),
-      node("ctl.ts#Ctl.update", {
-        kind: "method",
-        labels: ['@Patch(":id")', "@HttpCode(204)"],
-      }),
-      node("svc.ts#Svc.count", { changed: true, status: "removed", kind: "method", line: 20 }),
+      node("svc.ts#Svc.update", { changed: true, status: "modified", kind: "method", line: 4 }),
+      node("svc.ts#Svc.findOne", { kind: "method", line: 20 }),
+      node("ctl.ts#Ctl.update", { kind: "method", labels: ['@Patch(":id")', "@HttpCode(204)"] }),
+      node("svc.ts#Svc.count", { changed: true, status: "removed", kind: "method", line: 4 }),
     ],
     edges: [
       { from: "ctl.ts#Ctl.update", to: "svc.ts#Svc.update", kind: "calls" },
@@ -117,42 +87,57 @@ describe("renderHtml", () => {
     ],
   };
 
-  it("renders each file exactly once, with all its symbols inside", () => {
+  it("shows the whole file once, every line", () => {
     const html = renderHtml(result);
 
     expect(html.match(/<section class="win /g)).toHaveLength(2); // svc.ts + ctl.ts
     expect(html.match(/class="fname">svc\.ts</g)).toHaveLength(1);
-    expect(html.match(/<div class="sym /g)).toHaveLength(6);
-    expect(html).toContain("4 changed");
+    expect(html.match(/<span class="tx">\/\/ line /g)).toHaveLength(28); // every untouched line
+  });
+
+  it("colour-codes changed lines and has no status tags", () => {
+    const html = renderHtml(result);
+
+    expect(html).toContain('class="dl add');
+    expect(html).toContain('class="dl del');
+    expect(html).toContain("+2");
+    expect(html).not.toContain('class="badge"');
+    expect(html).not.toContain(">modified<");
+    expect(html).not.toContain(">added<");
   });
 
   it("shows decorators as one inline hint, not chips", () => {
     const html = renderHtml(result);
 
     expect(html).not.toContain('class="chip"');
-    expect(html).toContain('class="deco"');
     expect(html.match(/class="deco"/g)).toHaveLength(1);
     expect(html).toContain("@Patch(&quot;:id&quot;) @HttpCode(204)");
   });
 
-  it("does not repeat a method's lines inside its class", () => {
+  it("marks far-away unchanged lines so 'only changes' can fold them", () => {
     const html = renderHtml(result);
 
-    // "return 'new'" is in Svc.create; the class must not show it a second time.
-    expect(html.match(/return &#39;new&#39;|return 'new'/g)).toHaveLength(1);
-    // The class's own change (the decorator) is still shown.
-    expect(html).toContain("@Injectable()");
+    expect(html).toContain('class="dl gap"');
+    expect(html).toMatch(/class="dl ctx far"/);
+    // Lines next to the change stay visible in that mode.
+    expect(html).not.toMatch(/class="dl ctx far"[^>]*><span class="ln">3</);
   });
 
-  it("wraps long lines instead of scrolling and escapes code", () => {
+  it("anchors arrows on the symbol's own line and wraps long lines", () => {
     const html = renderHtml(result);
 
+    expect(html).toMatch(/<div class="dl [^"]*anchor[^"]*" id="s0"/);
     expect(html).toContain("white-space:pre-wrap");
-    expect(html).not.toContain("<em>2</em>");
-    expect(html).toContain("&lt;em&gt;2&lt;/em&gt;");
   });
 
-  it("sizes the window to fit its code, within limits", () => {
+  it("escapes code", () => {
+    const html = renderHtml(result);
+
+    expect(html).not.toContain("<em>old</em>");
+    expect(html).toContain("&lt;em&gt;old&lt;/em&gt;");
+  });
+
+  it("sizes windows to fit their code, within limits", () => {
     const widths = [...renderHtml(result).matchAll(/class="win [^"]*"[^>]*width:(\d+)px/g)].map(
       (m) => Number(m[1])
     );
@@ -162,10 +147,6 @@ describe("renderHtml", () => {
       expect(w).toBeGreaterThanOrEqual(360);
       expect(w).toBeLessThanOrEqual(760);
     }
-    // svc.ts holds the long line, so it is wider than the context-only file.
-    const svc = widths[0];
-    const ctl = widths[1];
-    expect(Math.max(svc, ctl)).toBeGreaterThan(Math.min(svc, ctl));
   });
 
   it("draws removed-code warnings and edges", () => {
@@ -177,7 +158,7 @@ describe("renderHtml", () => {
   });
 
   it("renders an empty state", () => {
-    const html = renderHtml({ base: sha("a"), head: sha("b"), symbols: [], nodes: [], edges: [] });
-    expect(html).toContain("No changed TypeScript symbols");
+    const html = renderHtml({ base: sha("a"), head: sha("b"), symbols: [], nodes: [], edges: [], files: [] });
+    expect(html).toContain("No changed TypeScript files");
   });
 });

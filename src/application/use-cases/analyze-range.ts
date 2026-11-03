@@ -6,6 +6,8 @@ import type { CallGraphPort } from "../ports/call-graph.port.js";
 import type { AnalysisResult } from "../../domain/analysis-result.js";
 import type { GraphEdge, GraphNode } from "../../domain/graph.js";
 import type { ChangedSymbol } from "../../domain/symbol.js";
+import type { FileView } from "../../domain/file-view.js";
+import { buildFileView } from "../file-view.js";
 
 export interface AnalyzeOptions {
   /** Hops of callers/callees to include around changed symbols (default 1). */
@@ -27,6 +29,7 @@ export class AnalyzeRangeUseCase {
 
     const fileChanges = this.diffReader.getFileChanges(base, head);
 
+    const files: FileView[] = [];
     const symbols = fileChanges.flatMap((fc) => {
       const ext = extname(fc.path);
       const parser = this.parsers.find((p) =>
@@ -41,6 +44,9 @@ export class AnalyzeRangeUseCase {
         ? this.sourceReader.getSource(resolvedHead, fc.headPath)
         : null;
 
+      const view = buildFileView(fc, baseSource, headSource);
+      if (view) files.push(view);
+
       return parser.parse({
         filePath: fc.path,
         removedLines: fc.removedLines,
@@ -53,7 +59,7 @@ export class AnalyzeRangeUseCase {
 
     const { nodes, edges } = this.buildGraph(symbols, resolvedHead, options.depth ?? 1);
 
-    return { base: resolvedBase, head: resolvedHead, symbols, nodes, edges };
+    return { base: resolvedBase, head: resolvedHead, symbols, nodes, edges, files };
   }
 
   private buildGraph(
