@@ -96,6 +96,7 @@ export class AnalyzeRangeUseCase {
         kind: s.kind,
         changed: true,
         status: s.status,
+        line: s.headRange?.start ?? s.baseRange?.start ?? 0,
         labels: existing?.labels ?? [],
       });
     }

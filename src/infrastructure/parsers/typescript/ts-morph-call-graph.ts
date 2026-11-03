@@ -42,6 +42,7 @@ export class TsMorphCallGraph implements CallGraphPort {
           name: sn.info.name,
           kind: sn.info.kind,
           changed: false,
+          line: sn.info.range.start,
           labels: sn.labels,
         });
       }

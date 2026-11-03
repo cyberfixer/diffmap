@@ -1,67 +1,50 @@
-import type { GraphEdge, GraphNode } from "../../domain/graph.js";
-import type { DiffLine } from "../../domain/symbol.js";
+export const MARGIN = 40;
+export const GAP_X = 150;
 
-export const CHANGED_W = 460;
-export const CONTEXT_W = 270;
-export const LINE_H = 17;
-export const BODY_PAD = 8;
-export const MAX_DIFF_LINES = 80;
-const GAP_X = 140;
-const GAP_Y = 30;
-const MARGIN = 40;
+/** One file window. Its height is unknown here: the browser measures it. */
+export interface WindowSpec {
+  id: string;
+  width: number;
+}
 
-export interface Box {
+export interface Placed {
+  id: string;
   x: number;
-  y: number;
-  w: number;
-  h: number;
-  headH: number;
+  col: number;
+  order: number; // position within the column, top to bottom
+  width: number;
 }
 
 export interface Layout {
-  boxes: Map<string, Box>;
+  placed: Map<string, Placed>;
+  columns: string[][]; // window ids per column, in vertical order
   width: number;
-  height: number;
-}
-
-export const headHeight = (n: GraphNode): number => 50 + (n.labels.length > 0 ? 20 : 0);
-
-/** Number of rendered diff rows, including the "N more" row when truncated. */
-export const visibleRows = (lines: DiffLine[]): number =>
-  Math.min(lines.length, MAX_DIFF_LINES) + (lines.length > MAX_DIFF_LINES ? 1 : 0);
-
-function boxSize(n: GraphNode, diff: DiffLine[]): { w: number; h: number; headH: number } {
-  const headH = headHeight(n);
-  const rows = n.changed ? visibleRows(diff) : 0;
-  const bodyH = rows > 0 ? BODY_PAD * 2 + rows * LINE_H : 0;
-  return { w: n.changed ? CHANGED_W : CONTEXT_W, h: headH + bodyH, headH };
 }
 
 /**
- * Left-to-right layered layout: callers sit left of what they call.
- * Cycles are broken by ignoring back edges when assigning layers.
+ * Left-to-right layered layout of file windows: files that call into other
+ * files sit to their left. Cycles are broken by ignoring back edges.
+ * Only x, column and vertical order are decided here; y comes from the
+ * measured heights in the browser.
  */
-export function layoutGraph(
-  nodes: GraphNode[],
-  edges: GraphEdge[],
-  diffs: Map<string, DiffLine[]>
+export function layoutWindows(
+  windows: WindowSpec[],
+  edges: { from: string; to: string }[]
 ): Layout {
-  const ids = new Set(nodes.map((n) => n.id));
-  const out = new Map<string, string[]>();
-  const preds = new Map<string, string[]>();
-  for (const n of nodes) {
-    out.set(n.id, []);
-    preds.set(n.id, []);
-  }
+  const ids = new Set(windows.map((w) => w.id));
+  const byId = new Map(windows.map((w) => [w.id, w]));
+  const out = new Map<string, string[]>(windows.map((w) => [w.id, []]));
+  const preds = new Map<string, string[]>(windows.map((w) => [w.id, []]));
+  const seen = new Set<string>();
   for (const e of edges) {
-    if (!ids.has(e.from) || !ids.has(e.to) || e.from === e.to) continue;
+    const key = `${e.from}>${e.to}`;
+    if (!ids.has(e.from) || !ids.has(e.to) || e.from === e.to || seen.has(key)) continue;
+    seen.add(key);
     out.get(e.from)!.push(e.to);
     preds.get(e.to)!.push(e.from);
   }
 
-  const sorted = [...nodes].sort(
-    (a, b) => a.file.localeCompare(b.file) || a.name.localeCompare(b.name)
-  );
+  const sorted = [...windows].sort((a, b) => a.id.localeCompare(b.id));
 
   // DFS: reverse postorder is a topological order once back edges are skipped.
   const state = new Map<string, 0 | 1 | 2>();
@@ -77,9 +60,9 @@ export function layoutGraph(
     state.set(u, 2);
     post.push(u);
   };
-  for (const n of sorted) if (!state.get(n.id)) dfs(n.id);
+  for (const w of sorted) if (!state.get(w.id)) dfs(w.id);
 
-  const layer = new Map<string, number>(nodes.map((n) => [n.id, 0]));
+  const layer = new Map<string, number>(windows.map((w) => [w.id, 0]));
   for (const u of post.reverse()) {
     for (const v of out.get(u)!) {
       if (back.has(`${u}>${v}`)) continue;
@@ -88,42 +71,37 @@ export function layoutGraph(
   }
 
   const maxLayer = Math.max(0, ...layer.values());
-  const columns: GraphNode[][] = Array.from({ length: maxLayer + 1 }, () => []);
-  for (const n of sorted) columns[layer.get(n.id)!].push(n);
+  const columns: string[][] = Array.from({ length: maxLayer + 1 }, () => []);
+  for (const w of sorted) columns[layer.get(w.id)!].push(w.id);
 
-  const boxes = new Map<string, Box>();
+  const placed = new Map<string, Placed>();
   let x = MARGIN;
-  let height = 0;
 
-  for (const column of columns) {
-    // Order by the average vertical position of already-placed callers,
-    // which keeps edges short and mostly uncrossed.
-    const centre = (n: GraphNode): number => {
-      const ys = preds
-        .get(n.id)!
-        .map((p) => boxes.get(p))
-        .filter((b): b is Box => b !== undefined)
-        .map((b) => b.y + b.headH / 2);
-      return ys.length ? ys.reduce((a, b) => a + b, 0) / ys.length : Infinity;
+  columns.forEach((column, col) => {
+    // Order by the average slot of already-placed callers (barycenter), which
+    // keeps edges short and mostly uncrossed.
+    const slot = (id: string): number => {
+      const ps = preds
+        .get(id)!
+        .map((p) => placed.get(p))
+        .filter((p): p is Placed => p !== undefined);
+      return ps.length ? ps.reduce((a, p) => a + p.order, 0) / ps.length : Infinity;
     };
     column.sort((a, b) => {
-      const ca = centre(a);
-      const cb = centre(b);
-      if (ca !== cb) return ca === Infinity ? 1 : cb === Infinity ? -1 : ca - cb;
-      return a.file.localeCompare(b.file) || a.name.localeCompare(b.name);
+      const sa = slot(a);
+      const sb = slot(b);
+      if (sa !== sb) return sa === Infinity ? 1 : sb === Infinity ? -1 : sa - sb;
+      return a.localeCompare(b);
     });
 
-    let y = MARGIN;
     let colW = 0;
-    for (const n of column) {
-      const size = boxSize(n, diffs.get(n.id) ?? []);
-      boxes.set(n.id, { x, y, ...size });
-      y += size.h + GAP_Y;
-      colW = Math.max(colW, size.w);
-    }
-    height = Math.max(height, y);
+    column.forEach((id, order) => {
+      const width = byId.get(id)!.width;
+      placed.set(id, { id, x, col, order, width });
+      colW = Math.max(colW, width);
+    });
     x += colW + GAP_X;
-  }
+  });
 
-  return { boxes, width: Math.max(x - GAP_X + MARGIN, 2 * MARGIN), height: height + MARGIN - GAP_Y };
+  return { placed, columns, width: Math.max(x - GAP_X + MARGIN, 2 * MARGIN) };
 }

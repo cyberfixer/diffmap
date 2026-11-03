@@ -8,6 +8,7 @@ export interface GraphNode {
   kind: SymbolKind;
   changed: boolean;
   status?: ChangeStatus;   // only set when changed
+  line: number;            // first line of the symbol (head, or base if removed)
   labels: string[];        // e.g. decorators such as "@Patch(':id')"
 }
 
