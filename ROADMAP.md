@@ -1,5 +1,7 @@
 # gitmap Roadmap
 
+**Goal:** make PR review feel as close as possible to working in an IDE, but focused on the changes, so the reviewer never gets lost.
+
 **What gitmap does today:** you give it two git refs. It finds which lines changed, works out which function, method or class each line sits in, and prints that as JSON.
 
 ## Fixes

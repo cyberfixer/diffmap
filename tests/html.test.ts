@@ -162,3 +162,34 @@ describe("renderHtml", () => {
     expect(html).toContain("No changed TypeScript files");
   });
 });
+
+describe("file window header", () => {
+  const result: AnalysisResult = {
+    base: sha("a"),
+    head: sha("b"),
+    symbols: [],
+    nodes: [],
+    edges: [],
+    files: [
+      {
+        path: "apps/api/src/tasks/tasks.service.ts",
+        status: "modified",
+        lines: [{ type: "add", oldLine: null, newLine: 1, text: "x" }],
+      },
+    ],
+  };
+
+  it("shows the full repo path, not just the file name", () => {
+    const html = renderHtml(result);
+    expect(html).toContain(
+      '<span class="fdir">apps/api/src/tasks/</span><span class="fname">tasks.service.ts</span>'
+    );
+    expect(html).not.toContain("text-overflow:ellipsis; white-space:nowrap; direction:rtl");
+  });
+
+  it("has a button that copies the full path", () => {
+    const html = renderHtml(result);
+    expect(html).toContain('class="copy" type="button" data-path="apps/api/src/tasks/tasks.service.ts"');
+    expect(html).toContain("navigator.clipboard");
+  });
+});

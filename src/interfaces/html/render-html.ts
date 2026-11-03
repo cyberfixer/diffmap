@@ -205,7 +205,7 @@ export function renderHtml(
       }
 
       return `<section class="win ${view ? "has-change" : "ctx-only"}" id="w${winIdx.get(file)}" data-col="${p.col}" data-order="${p.order}" style="left:${p.x}px;width:${p.width}px">
-  <header class="wh"><span class="fname">${esc(base)}</span><span class="fdir">${esc(dir)}</span><span class="fmeta">${meta}</span></header>
+  <header class="wh"><span class="fpath" title="${esc(file)}"><span class="fdir">${esc(dir)}</span><span class="fname">${esc(base)}</span></span><button class="copy" type="button" data-path="${esc(file)}" title="Copy path" aria-label="Copy path ${esc(file)}"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path fill="currentColor" d="M0 6.75C0 5.78.78 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .14.11.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Zm5-5C5 .78 5.78 0 6.75 0h7.5C15.22 0 16 .78 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .14.11.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg><span class="copy-label">Copy</span></button><span class="fmeta">${meta}</span></header>
   ${body}
 </section>`;
     })
@@ -274,11 +274,18 @@ export function renderHtml(
   .win { position:absolute; top:${MARGIN}px; background:var(--card); border:1px solid var(--line);
          border-radius:8px; overflow:hidden; transition:opacity .15s; }
   .win.ctx-only { opacity:.85; }
-  .wh { display:flex; align-items:baseline; gap:8px; padding:7px 12px; border-bottom:1px solid var(--line);
+  .wh { display:flex; align-items:center; gap:8px; padding:7px 10px 7px 12px; border-bottom:1px solid var(--line);
         background:var(--bg); min-width:0; }
-  .fname { font:700 13px ui-monospace,monospace; flex:none; }
-  .fdir { color:var(--muted); font:11px ui-monospace,monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; direction:rtl; text-align:left; min-width:0; }
-  .fmeta { margin-left:auto; color:var(--muted); font-size:11px; flex:none; }
+  /* The full path is always shown; long paths wrap rather than being cut off. */
+  .fpath { font:12px/1.35 ui-monospace,monospace; overflow-wrap:anywhere; min-width:0; flex:1; }
+  .fdir { color:var(--muted); }
+  .fname { font-weight:700; color:var(--fg); }
+  .copy { display:inline-flex; align-items:center; gap:4px; flex:none; border:1px solid var(--line);
+          background:var(--card); color:var(--muted); border-radius:6px; padding:2px 7px; font-size:11px;
+          cursor:pointer; }
+  .copy:hover { color:var(--fg); border-color:var(--edge); }
+  .copy.done { color:var(--added); border-color:var(--added); }
+  .fmeta { color:var(--muted); font-size:11px; flex:none; }
   .m-add { color:var(--added); font-weight:600; } .m-del { color:var(--removed); font-weight:600; }
   .code { padding:4px 0; background:var(--bg); }
   .dl { display:flex; font:12px/17px ui-monospace,monospace; min-height:17px; }
@@ -394,7 +401,7 @@ ${empty}
   }, { passive: false });
   var drag = null;
   vp.addEventListener('pointerdown', function (e) {
-    if (e.target.closest('.tx')) return;   // let people select code
+    if (e.target.closest('.tx, .fpath, button')) return;   // let people select code and paths, and click buttons
     drag = { x: e.clientX - tx, y: e.clientY - ty };
     vp.classList.add('drag');
   });
@@ -408,6 +415,35 @@ ${empty}
   document.getElementById('zout').onclick = function () { zoom(1 / 1.2, vp.clientWidth / 2, vp.clientHeight / 2); };
   var only = document.getElementById('only');
   only.onclick = function () { document.body.classList.toggle('only'); only.classList.toggle('on'); relayout(); };
+
+  // Copy a file's path. The Clipboard API can be unavailable (e.g. some file:// pages),
+  // so fall back to selecting a hidden textarea.
+  function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      return navigator.clipboard.writeText(text).then(function () { return true; }, function () { return legacyCopy(text); });
+    }
+    return Promise.resolve(legacyCopy(text));
+  }
+  function legacyCopy(text) {
+    var ta = document.createElement('textarea');
+    ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    var ok = false;
+    try { ok = document.execCommand('copy'); } catch (err) { ok = false; }
+    document.body.removeChild(ta);
+    return ok;
+  }
+  [].slice.call(document.querySelectorAll('.copy')).forEach(function (b) {
+    var label = b.querySelector('.copy-label'), timer = null;
+    b.addEventListener('click', function () {
+      copyText(b.dataset.path).then(function (ok) {
+        label.textContent = ok ? 'Copied' : 'Copy failed';
+        b.classList.toggle('done', ok);
+        clearTimeout(timer);
+        timer = setTimeout(function () { label.textContent = 'Copy'; b.classList.remove('done'); }, 1400);
+      });
+    });
+  });
 
   [].slice.call(document.querySelectorAll('[data-ss]')).forEach(function (n) {
     n.addEventListener('mouseenter', function () {
