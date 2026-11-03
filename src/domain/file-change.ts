@@ -1,3 +1,5 @@
+import type { DiffLine } from "./symbol.js";
+
 /**
  * Represents a single file touched by a diff, with the sets of line numbers
  * that were added or removed. Language-neutral — no parsing logic here.
@@ -11,4 +13,6 @@ export interface FileChange {
   removedLines: Set<number>;
   /** Line numbers in the head revision that were added. */
   addedLines: Set<number>;
+  /** Every diff line (changes plus context), in diff order. */
+  lines: DiffLine[];
 }

@@ -13,4 +13,14 @@ export class GitSourceReader implements SourceReaderPort {
     if (result.status !== 0) return null;
     return result.stdout;
   }
+
+  listFiles(rev: string): string[] {
+    const result = spawnSync("git", ["ls-tree", "-r", "--name-only", rev], {
+      encoding: "utf-8",
+      cwd: this.cwd,
+      maxBuffer: 50 * 1024 * 1024,
+    });
+    if (result.status !== 0) return [];
+    return result.stdout.split("\n").filter(Boolean);
+  }
 }

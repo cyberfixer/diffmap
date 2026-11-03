@@ -7,4 +7,7 @@ export interface SourceReaderPort {
    * file does not exist at that revision.
    */
   getSource(rev: string, filePath: string): string | null;
+
+  /** List every tracked file path at the given revision. */
+  listFiles(rev: string): string[];
 }

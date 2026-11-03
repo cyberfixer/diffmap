@@ -1,9 +1,11 @@
-import type { ChangedSymbol } from "../../domain/symbol.js";
+import type { ChangedSymbol, DiffLine } from "../../domain/symbol.js";
 
 export interface SymbolParserInput {
   filePath: string;
   removedLines: Set<number>;
   addedLines: Set<number>;
+  /** Every diff line of this file (changes plus context). */
+  diffLines: DiffLine[];
   baseSource: string | null;
   headSource: string | null;
 }

@@ -12,11 +12,21 @@ export interface LineRange {
   end: number;   // 1-based, inclusive
 }
 
+/** One line of a unified diff, with its line number on each side. */
+export interface DiffLine {
+  type: "add" | "del" | "ctx";
+  oldLine: number | null; // null for added lines
+  newLine: number | null; // null for deleted lines
+  text: string;
+}
+
 export interface ChangedSymbol {
-  file: string;              // repo-relative path
-  name: string;              // qualified name, e.g. "MyClass.doThing" or "processItems"
+  id: string;                  // stable id: "<file>#<name>"
+  file: string;                // repo-relative path
+  name: string;                // qualified name, e.g. "MyClass.doThing" or "processItems"
   kind: SymbolKind;
   status: ChangeStatus;
   baseRange: LineRange | null; // line range in base rev (null if added)
   headRange: LineRange | null; // line range in head rev (null if removed)
+  diff: DiffLine[];            // the diff lines that belong to this symbol
 }

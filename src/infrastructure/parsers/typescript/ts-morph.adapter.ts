@@ -1,16 +1,7 @@
-import { Project, Node, SyntaxKind, type SourceFile } from "ts-morph";
+import { Project } from "ts-morph";
 import type { SymbolParserPort, SymbolParserInput } from "../../../application/ports/symbol-parser.port.js";
-import type { ChangedSymbol, ChangeStatus, LineRange, SymbolKind } from "../../../domain/symbol.js";
-
-// ---------------------------------------------------------------------------
-// Internal types
-// ---------------------------------------------------------------------------
-
-interface SymbolInfo {
-  name: string;
-  kind: SymbolKind;
-  range: LineRange;
-}
+import type { ChangedSymbol, ChangeStatus, DiffLine, LineRange } from "../../../domain/symbol.js";
+import { listSymbolNodes, type SymbolInfo } from "./symbols.js";
 
 /** Everything we learned about one side (base or head) of a file. */
 interface SideAnalysis {
@@ -22,15 +13,11 @@ interface SideAnalysis {
   topLevelCount: number;
 }
 
-// ---------------------------------------------------------------------------
-// Port implementation
-// ---------------------------------------------------------------------------
-
 export class TsMorphAdapter implements SymbolParserPort {
   readonly supportedExtensions = [".ts", ".tsx"] as const;
 
   parse(input: SymbolParserInput): ChangedSymbol[] {
-    const { filePath, removedLines, addedLines, baseSource, headSource } = input;
+    const { filePath, removedLines, addedLines, diffLines, baseSource, headSource } = input;
 
     const base = analyzeSide(baseSource, removedLines);
     const head = analyzeSide(headSource, addedLines);
@@ -51,12 +38,14 @@ export class TsMorphAdapter implements SymbolParserPort {
         inBase && inHead ? "modified" : inHead ? "added" : "removed";
 
       results.push({
+        id: `${filePath}#${name}`,
         file: filePath,
         name,
         kind: info.kind,
         status,
         baseRange: inBase?.range ?? null,
         headRange: inHead?.range ?? null,
+        diff: sliceDiff(diffLines, inBase?.range ?? null, inHead?.range ?? null),
       });
     }
 
@@ -74,12 +63,14 @@ export class TsMorphAdapter implements SymbolParserPort {
               ? "added"
               : "removed";
         results.push({
+          id: `${filePath}#top-level`,
           file: filePath,
           name: filePath,
           kind: "top-level",
           status,
           baseRange: null,
           headRange: null,
+          diff: diffLines.filter((l) => l.type !== "ctx"),
         });
       }
     }
@@ -87,10 +78,6 @@ export class TsMorphAdapter implements SymbolParserPort {
     return results;
   }
 }
-
-// ---------------------------------------------------------------------------
-// AST helpers
-// ---------------------------------------------------------------------------
 
 function analyzeSide(source: string | null, lines: Set<number>): SideAnalysis {
   const result: SideAnalysis = {
@@ -103,7 +90,7 @@ function analyzeSide(source: string | null, lines: Set<number>): SideAnalysis {
   const project = new Project({ useInMemoryFileSystem: true });
   const sourceFile = project.createSourceFile("__analysis__.ts", source);
 
-  const symbols = listSymbols(sourceFile);
+  const symbols = listSymbolNodes(sourceFile).map((s) => s.info);
   for (const sym of symbols) {
     if (!result.all.has(sym.name)) result.all.set(sym.name, sym);
   }
@@ -115,50 +102,6 @@ function analyzeSide(source: string | null, lines: Set<number>): SideAnalysis {
   }
 
   return result;
-}
-
-/** Collect every named function / method / class / arrow-variable in the file. */
-function listSymbols(sourceFile: SourceFile): SymbolInfo[] {
-  const symbols: SymbolInfo[] = [];
-
-  function visit(node: Node): void {
-    let kind: SymbolKind | null = null;
-    let name: string | null = null;
-
-    if (Node.isFunctionDeclaration(node)) {
-      name = node.getName() ?? null;
-      if (name) kind = "function";
-    } else if (Node.isMethodDeclaration(node)) {
-      name = buildMethodName(node);
-      kind = "method";
-    } else if (Node.isConstructorDeclaration(node)) {
-      const cls = node.getFirstAncestorByKind(SyntaxKind.ClassDeclaration);
-      name = cls?.getName() ? `${cls.getName()}.constructor` : "constructor";
-      kind = "method";
-    } else if (Node.isClassDeclaration(node)) {
-      name = node.getName() ?? null;
-      if (name) kind = "class";
-    } else if (Node.isVariableDeclaration(node)) {
-      const init = node.getInitializer();
-      if (init && Node.isArrowFunction(init)) {
-        name = buildVariableName(node);
-        kind = "arrow";
-      }
-    }
-
-    if (kind !== null && name !== null) {
-      symbols.push({
-        name,
-        kind,
-        range: { start: node.getStartLineNumber(), end: node.getEndLineNumber() },
-      });
-    }
-
-    node.forEachChild(visit);
-  }
-
-  visit(sourceFile);
-  return symbols;
 }
 
 /** Smallest symbol whose range contains the line, or null if none does. */
@@ -174,14 +117,19 @@ function innermostAtLine(symbols: SymbolInfo[], line: number): SymbolInfo | null
   return best;
 }
 
-function buildMethodName(node: Node): string {
-  const methodName = Node.isMethodDeclaration(node) ? node.getName() : "";
-  const cls = node.getFirstAncestorByKind(SyntaxKind.ClassDeclaration);
-  return cls?.getName() ? `${cls.getName()}.${methodName}` : methodName;
-}
+const inRange = (n: number, r: LineRange): boolean => r.start <= n && n <= r.end;
 
-function buildVariableName(node: Node): string {
-  const varName = Node.isVariableDeclaration(node) ? node.getName() : "";
-  const cls = node.getFirstAncestorByKind(SyntaxKind.ClassDeclaration);
-  return cls?.getName() ? `${cls.getName()}.${varName}` : varName;
+/** Keep the diff lines that fall inside the symbol on either side. */
+function sliceDiff(
+  lines: DiffLine[],
+  baseRange: LineRange | null,
+  headRange: LineRange | null
+): DiffLine[] {
+  return lines.filter((l) => {
+    if (l.newLine !== null && headRange && inRange(l.newLine, headRange)) return true;
+    if (l.type === "del" && l.oldLine !== null && baseRange && inRange(l.oldLine, baseRange)) {
+      return true;
+    }
+    return false;
+  });
 }
