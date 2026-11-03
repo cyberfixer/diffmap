@@ -30,19 +30,20 @@ These come first because everything later builds on this output.
 
 ## Features
 
-### 6. Call graph
+### 6. Call graph — DONE
 - **Adds:** for each changed symbol, find who calls it.
 - **Why:** it answers "which code does this diff affect?", the point of the tool.
-- **How:** a new field on `ChangedSymbol`, using ts-morph to find call expressions.
+- **How:** `CallGraphPort` + ts-morph type checker; `nodes`/`edges` on the result, `--depth N` hops.
+- **Status:** done. Calls into removed code are flagged `calls-removed`. Known gaps: calls through interfaces, class-property arrows.
 
 ### 7. Impact analysis
 - **Adds:** follow callers of callers to get the full blast radius, ranked by distance.
 - **Depends on:** the call graph.
 
-### 8. HTML graph output — IN PROGRESS
+### 8. HTML graph output — DONE (first version)
 - **Adds:** a shareable page showing changed functions and their callers as a graph.
-- **Step 1 (first cut):** changed symbols only, grouped by file (`--format html`). Callers are added once the call graph (6) exists.
-- **Where:** a new file in `src/interfaces/`.
+- **Status:** `--format html` draws a left-to-right flow map with an inline diff per changed symbol, pan/zoom, hover tracing, and dashed red arrows for calls into removed code.
+- **Next:** minimap/search for big diffs, file-level import edges, caller-of-caller depth defaults.
 
 ### 9. Nx support
 - **Adds:** understand Nx monorepo project boundaries, so callers are labelled by project.
