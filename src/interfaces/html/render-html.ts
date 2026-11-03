@@ -1,3 +1,5 @@
+import { extname } from "node:path";
+import type { SyntaxHighlighterPort, HighlightToken } from "../../application/ports/syntax-highlighter.port.js";
 import type { AnalysisResult } from "../../domain/analysis-result.js";
 import type { FileView } from "../../domain/file-view.js";
 import type { GraphNode } from "../../domain/graph.js";
@@ -30,7 +32,43 @@ function windowWidth(view: FileView | undefined, nodes: GraphNode[]): number {
 interface Row {
   line: DiffLine;
   anchors: number[]; // indexes of graph nodes that start on this row
+  tokens?: HighlightToken[]; // syntax-coloured text, when a highlighter supports the file
 }
+
+/**
+ * Colour a file view. Added lines come from the new file and removed lines from
+ * the old one, so each version is tokenized as its own whole document (this keeps
+ * multi-line comments and template strings right); unchanged lines are in both.
+ */
+function highlightRows(view: FileView, hl: SyntaxHighlighterPort): HighlightToken[][] | null {
+  const headAt: number[] = [];
+  const baseAt: number[] = [];
+  view.lines.forEach((l, i) => {
+    if (l.type !== "del") headAt.push(i);
+    if (l.type !== "add") baseAt.push(i);
+  });
+  const head = hl.highlight(view.path, headAt.map((i) => view.lines[i].text));
+  const base = hl.highlight(view.path, baseAt.map((i) => view.lines[i].text));
+  if (!head || !base) return null;
+
+  const out: HighlightToken[][] = new Array(view.lines.length);
+  headAt.forEach((i, k) => (out[i] = head[k]));
+  baseAt.forEach((i, k) => {
+    if (view.lines[i].type === "del") out[i] = base[k];
+  });
+  return out;
+}
+
+const renderText = (r: Row): string =>
+  r.tokens
+    ? r.tokens
+        .map((t) =>
+          t.kind === "plain"
+            ? esc(expandTabs(t.text))
+            : `<span class="tk-${t.kind}">${esc(expandTabs(t.text))}</span>`
+        )
+        .join("")
+    : esc(expandTabs(r.line.text));
 
 /** Find the row where a symbol starts (deleted symbols start on a deleted row). */
 function rowFor(rows: Row[], n: GraphNode): number {
@@ -80,7 +118,7 @@ function renderRow(r: Row, connected: Set<number>, far: boolean): string {
     .slice(1)
     .map((a) => `<span class="alias" id="s${a}"></span>`)
     .join("");
-  return `<div class="${cls}"${id}${ss}><span class="ln">${num ?? ""}</span><span class="dot"></span><span class="sg">${sign}</span><span class="tx">${esc(expandTabs(l.text))}${aliases}</span></div>`;
+  return `<div class="${cls}"${id}${ss}><span class="ln">${num ?? ""}</span><span class="dot"></span><span class="sg">${sign}</span><span class="tx">${renderText(r)}${aliases}</span></div>`;
 }
 
 /** Context-only files (unchanged callers/callees) stay compact: names only. */
@@ -98,7 +136,10 @@ function renderCompact(nodes: GraphNode[], idx: Map<string, number>, connected: 
 }
 
 /** Render an AnalysisResult as one self-contained, interactive HTML map. */
-export function renderHtml(result: AnalysisResult): string {
+export function renderHtml(
+  result: AnalysisResult,
+  highlighters: SyntaxHighlighterPort[] = []
+): string {
   const symIndex = new Map(result.nodes.map((n, i) => [n.id, i]));
   const views = new Map<string, FileView>((result.files ?? []).map((f) => [f.path, f]));
 
@@ -149,7 +190,9 @@ export function renderHtml(result: AnalysisResult): string {
       let meta = "context";
       let body: string;
       if (view) {
-        const rows: Row[] = view.lines.map((line) => ({ line, anchors: [] }));
+        const hl = highlighters.find((h) => h.supportedExtensions.includes(extname(file)));
+        const tokens = hl ? highlightRows(view, hl) : null;
+        const rows: Row[] = view.lines.map((line, i) => ({ line, anchors: [], tokens: tokens?.[i] }));
         for (const n of nodes) rows[rowFor(rows, n)]?.anchors.push(symIndex.get(n.id)!);
         const add = view.lines.filter((l) => l.type === "add").length;
         const del = view.lines.filter((l) => l.type === "del").length;
@@ -193,11 +236,15 @@ export function renderHtml(result: AnalysisResult): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>gitmap ${esc(result.base.slice(0, 7))}..${esc(result.head.slice(0, 7))}</title>
 <style>
-  :root { --bg:#ffffff; --fg:#1f2328; --muted:#656d76; --card:#f6f8fa; --line:#d0d7de; --edge:#8c959f;
+  :root { --tk-keyword:#cf222e; --tk-string:#0a3069; --tk-comment:#6e7781; --tk-number:#0550ae;
+          --tk-function:#8250df; --tk-type:#953800; --tk-decorator:#116329;
+          --bg:#ffffff; --fg:#1f2328; --muted:#656d76; --card:#f6f8fa; --line:#d0d7de; --edge:#8c959f;
           --added:#1a7f37; --removed:#cf222e;
           --add-bg:#dafbe1; --add-ln:#aceebb; --del-bg:#ffebe9; --del-ln:#ffcecb; }
   @media (prefers-color-scheme: dark) {
-    :root { --bg:#0d1117; --fg:#e6edf3; --muted:#8b949e; --card:#161b22; --line:#30363d; --edge:#6e7681;
+    :root { --tk-keyword:#ff7b72; --tk-string:#a5d6ff; --tk-comment:#8b949e; --tk-number:#79c0ff;
+            --tk-function:#d2a8ff; --tk-type:#ffa657; --tk-decorator:#7ee787;
+            --bg:#0d1117; --fg:#e6edf3; --muted:#8b949e; --card:#161b22; --line:#30363d; --edge:#6e7681;
             --added:#3fb950; --removed:#f85149;
             --add-bg:#12301a; --add-ln:#1b4a28; --del-bg:#3d1518; --del-ln:#5c1f24; }
   }
@@ -244,6 +291,9 @@ export function renderHtml(result: AnalysisResult): string {
   .sg { width:12px; flex:none; user-select:none; }
   .dl.add .sg { color:var(--added); } .dl.del .sg { color:var(--removed); }
   .tx { white-space:pre-wrap; overflow-wrap:anywhere; min-width:0; flex:1; padding-right:10px; }
+  .tk-keyword { color:var(--tk-keyword); } .tk-string { color:var(--tk-string); }
+  .tk-comment { color:var(--tk-comment); font-style:italic; } .tk-number { color:var(--tk-number); }
+  .tk-function { color:var(--tk-function); } .tk-type { color:var(--tk-type); } .tk-decorator { color:var(--tk-decorator); }
   .alias { display:inline-block; width:0; height:0; }
   .dl.gap { display:none; color:var(--muted); padding-left:62px; font-style:italic; background:var(--card); }
   body.only .dl.gap { display:flex; }
