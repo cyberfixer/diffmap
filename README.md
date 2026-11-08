@@ -247,6 +247,9 @@ A changed `*.component.html` counts as a change of its own and shows what it use
 
 ## Development
 
+New to the code? Start with [ARCHITECTURE.md](ARCHITECTURE.md): how a change
+flows from the diff to the map, the layers, and which file to open for what.
+
 ```bash
 npm test           # all tests
 npm run typecheck  # type errors only
