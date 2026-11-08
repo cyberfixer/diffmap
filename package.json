@@ -10,7 +10,8 @@
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "start": "node dist/server.js"
   },
   "dependencies": {
     "parse-diff": "^0.11.1",

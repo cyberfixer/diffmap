@@ -95,7 +95,7 @@ export class GitLabClient implements MergeRequestHostPort {
       diff_refs: { base_sha: string; head_sha: string; start_sha: string } | null;
     }>("GET", this.mrPath(projectPath, iid));
     if (!mr.diff_refs) throw new HostError("This merge request has no diff yet.", 409);
-    const project = await this.call<{ http_url_to_repo: string; path_with_namespace: string }>(
+    const project = await this.call<{ path_with_namespace: string }>(
       "GET",
       `/projects/${mr.project_id}`,
     );
@@ -109,7 +109,9 @@ export class GitLabClient implements MergeRequestHostPort {
       sourceBranch: mr.source_branch,
       targetBranch: mr.target_branch,
       diffRefs: { baseSha: mr.diff_refs.base_sha, headSha: mr.diff_refs.head_sha, startSha: mr.diff_refs.start_sha },
-      cloneUrl: project.http_url_to_repo,
+      // Built from the configured GitLab address (not GitLab's own idea of its URL),
+      // so it works when this service reaches GitLab by an internal name.
+      cloneUrl: `${this.baseUrl.replace(/\/$/, "")}/${project.path_with_namespace}.git`,
     };
   }
 

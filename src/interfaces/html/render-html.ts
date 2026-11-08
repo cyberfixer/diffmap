@@ -6,6 +6,26 @@ import type { CallSite, GraphNode } from "../../domain/graph.js";
 import type { DiffLine } from "../../domain/symbol.js";
 import { STYLE } from "./html-style.js";
 import { CLIENT_SCRIPT } from "./html-client.js";
+import { MR_CLIENT_SCRIPT } from "./html-client-mr.js";
+import type {
+  Approvals,
+  MergeRequestInfo,
+  Person,
+  ReviewDiscussion,
+} from "../../application/ports/merge-request.port.js";
+
+/** Extra data when the page shows a GitLab merge request (service mode). */
+export interface MrPage {
+  mr: MergeRequestInfo;
+  discussions: ReviewDiscussion[];
+  approvals: Approvals;
+  user: Person;
+  apiBase: string; // e.g. "/api/team/api/-/merge_requests/42"
+}
+
+export interface RenderOptions {
+  mr?: MrPage;
+}
 
 const esc = (s: string): string =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -126,8 +146,10 @@ interface SymInfo {
 /** Render an AnalysisResult as one self-contained, interactive review page. */
 export function renderHtml(
   result: AnalysisResult,
-  highlighters: SyntaxHighlighterPort[] = []
+  highlighters: SyntaxHighlighterPort[] = [],
+  options: RenderOptions = {}
 ): string {
+  const mrPage = options.mr;
   const hlFor = (file: string) => highlighters.find((h) => h.supportedExtensions.includes(extname(file)));
   const views = [...(result.files ?? [])].sort((a, b) => a.path.localeCompare(b.path));
   const viewIdx = new Map(views.map((v, i) => [v.path, i]));
@@ -160,8 +182,15 @@ export function renderHtml(
     };
   });
 
-  // Lines in changed files that must stay visible when folded (call sites).
+  // Lines in changed files that must stay visible when folded (call sites, comments).
   const keepLines = new Map<string, Set<number>>();
+  const keepOld = new Map<string, Set<number>>();
+  for (const d of mrPage?.discussions ?? []) {
+    const p = d.position;
+    if (!p) continue;
+    if (p.newLine !== null) (keepLines.get(p.path) ?? keepLines.set(p.path, new Set()).get(p.path)!).add(p.newLine);
+    else if (p.oldLine !== null) (keepOld.get(p.path) ?? keepOld.set(p.path, new Set()).get(p.path)!).add(p.oldLine);
+  }
 
   for (const e of result.edges) {
     const k = kOf.get(e.to);
@@ -216,10 +245,11 @@ export function renderHtml(
         defsAt.set(r, [...(defsAt.get(r) ?? []), k]);
       }
       const keep = keepLines.get(view.path) ?? new Set<number>();
+      const keepO = keepOld.get(view.path) ?? new Set<number>();
 
       const near = new Array<boolean>(view.lines.length).fill(false);
       view.lines.forEach((l, i) => {
-        if (l.type === "ctx" && !keep.has(l.newLine ?? -1)) return;
+        if (l.type === "ctx" && !keep.has(l.newLine ?? -1) && !keepO.has(l.oldLine ?? -1)) return;
         for (let j = Math.max(0, i - NEAR); j <= Math.min(view.lines.length - 1, i + NEAR); j++) near[j] = true;
       });
 
@@ -311,10 +341,15 @@ export function renderHtml(
   // ── header ──
   const short = (sha: string) => sha.slice(0, 7);
   const range = result.range;
-  const title = range?.title ?? (range ? `${range.headName} → ${range.baseName}` : "Code changes");
-  const sub = range
-    ? `${range.headName} → ${range.baseName} · ${range.commits} commit${range.commits === 1 ? "" : "s"} · ${short(result.base)}..${short(result.head)}`
-    : `${short(result.base)}..${short(result.head)}`;
+  const commits = range ? ` · ${range.commits} commit${range.commits === 1 ? "" : "s"}` : "";
+  const title = mrPage
+    ? `!${mrPage.mr.iid} · ${mrPage.mr.title}`
+    : range?.title ?? (range ? `${range.headName} → ${range.baseName}` : "Code changes");
+  const sub = mrPage
+    ? `${mrPage.mr.author.name} · ${mrPage.mr.sourceBranch} → ${mrPage.mr.targetBranch}${commits}`
+    : range
+      ? `${range.headName} → ${range.baseName}${commits} · ${short(result.base)}..${short(result.head)}`
+      : `${short(result.base)}..${short(result.head)}`;
   const broken = result.edges.filter((e) => e.kind === "calls-removed").length;
   const warnPill = broken
     ? `<span class="pill warn">${broken === 1 ? "1 call still points" : `${broken} calls still point`} at removed code</span>`
@@ -333,6 +368,15 @@ export function renderHtml(
     rightX,
     rightW,
     top: MARGIN + LABEL_H,
+    mr: mrPage
+      ? {
+          apiBase: mrPage.apiBase,
+          webUrl: mrPage.mr.webUrl,
+          user: mrPage.user,
+          approvals: mrPage.approvals,
+          discussions: mrPage.discussions,
+        }
+      : null,
   };
 
   const empty = views.length === 0;
@@ -347,14 +391,15 @@ export function renderHtml(
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
 <style>${STYLE}</style>
 </head>
-<body class="show-out">
+<body class="show-out${mrPage ? " mr" : ""}">
 <header class="top">
   <div class="brand"><svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2.5"></circle><circle cx="19" cy="6" r="2.5"></circle><circle cx="12" cy="18" r="2.5"></circle><path d="M7.5 6h9M6.5 8.2l4.2 7.6M17.5 8.2l-4.2 7.6"></path></svg><span>gitmap</span></div>
-  <div class="title"><div class="t">${esc(title)}</div><div class="s mono">${esc(sub)}</div></div>
+  <div class="title"><div class="t">${mrPage ? `<a href="${esc(mrPage.mr.webUrl)}" title="Open in GitLab">${esc(title)}</a>` : esc(title)}</div><div class="s mono">${esc(sub)}</div></div>
   <div class="pills">
     <span class="pill mono"><span class="add">+${addedLines}</span><span class="del">−${removedLines}</span></span>
     <span class="pill">${views.length} file${views.length === 1 ? "" : "s"} · ${changed.length} symbol${changed.length === 1 ? "" : "s"}</span>
     ${warnPill}
+    ${mrPage ? mrActions(mrPage) : ""}
   </div>
 </header>
 <div class="panes">
@@ -421,8 +466,23 @@ export function renderHtml(
   </aside>
 </div>
 <script>var GITMAP = ${scriptJson(data)};</script>
-<script>${CLIENT_SCRIPT}</script>
+<script>${CLIENT_SCRIPT}</script>${mrPage ? `\n<script>${MR_CLIENT_SCRIPT}</script>` : ""}
 </body>
 </html>
 `;
+}
+
+/** Approve button, link back to GitLab and the signed-in user (service mode). */
+function mrActions(p: MrPage): string {
+  const a = p.approvals;
+  const approvedNote = a.approvedBy.length
+    ? `<span class="pill" id="approvedby" title="${esc(a.approvedBy.map((u) => u.name).join(", "))}">Approved by ${a.approvedBy.length}</span>`
+    : `<span class="pill" id="approvedby" hidden></span>`;
+  const label = a.userHasApproved ? "Revoke approval" : "Approve";
+  const disabled = !a.userHasApproved && !a.userCanApprove ? " disabled title=\"You can't approve this merge request\"" : "";
+  return `${approvedNote}
+    <span class="pill" id="ccount">${p.discussions.length} comment${p.discussions.length === 1 ? "" : "s"}</span>
+    <a class="hbtn" href="${esc(p.mr.webUrl)}">Open in GitLab</a>
+    <button class="hbtn ${a.userHasApproved ? "" : "primary"}" id="approve" type="button" aria-pressed="${a.userHasApproved}"${disabled}>${label}</button>
+    <form method="post" action="/auth/logout" class="who"><span title="Signed in as @${esc(p.user.username)}">${esc(p.user.name)}</span><button type="submit" class="link">Sign out</button></form>`;
 }

@@ -24,6 +24,8 @@ export interface CommentRequest {
   position?: LinePosition;
   /** The line's code, quoted when the comment has to fall back to a general MR comment. */
   code?: string;
+  /** Post as a general comment quoting the line (for files outside the diff). */
+  general?: boolean;
 }
 
 const MAX_CACHED = 20;
@@ -73,7 +75,7 @@ export class ReviewMergeRequestUseCase {
     req: CommentRequest,
   ): Promise<{ discussion: ReviewDiscussion; fallback: boolean }> {
     const mr = await host.getMergeRequest(projectPath, iid);
-    if (req.position) {
+    if (req.position && !req.general) {
       try {
         return { discussion: await host.createDiscussion(mr, { body: req.body, position: req.position }), fallback: false };
       } catch (err) {

@@ -130,7 +130,7 @@ export const CLIENT_SCRIPT = `
   var drag = null, moved = false;
   vp.addEventListener('pointerdown', function (e) {
     moved = false;
-    if (e.button !== 0 || e.target.closest('.tx, .fpath, button')) return; // keep code selectable, buttons clickable
+    if (e.button !== 0 || e.target.closest('.tx, .fpath, button, a, textarea, .thread, .composer')) return; // keep code selectable, buttons clickable
     drag = { x: e.clientX - tx, y: e.clientY - ty, sx: e.clientX, sy: e.clientY };
     vp.classList.add('drag');
   });
@@ -349,6 +349,9 @@ export const CLIENT_SCRIPT = `
       b._t = setTimeout(function () { label.textContent = 'Copy'; b.classList.remove('done'); }, 1400);
     });
   });
+
+  // Hooks for the merge-request script (comments change card heights).
+  window.gitmap = { relayout: relayout, wasDrag: function () { return moved; } };
 
   updateViewed();
   relayout(); fit();

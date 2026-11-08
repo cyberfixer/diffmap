@@ -201,6 +201,39 @@ export const STYLE = `
   .warnbox { padding:10px 12px; border:1px solid var(--del-edge); background:var(--del-bg); color:var(--del-fg); border-radius:10px; font-size:13px; }
   .empty { margin:auto; color:var(--muted); }
 
+
+  /* ── merge-request mode: header actions, comments ── */
+  .hbtn { display:inline-flex; align-items:center; justify-content:center; min-height:36px; padding:0 14px;
+          border:1px solid var(--line-strong); border-radius:8px; background:var(--panel); color:var(--fg);
+          font-size:13px; text-decoration:none; cursor:pointer; }
+  .hbtn:hover { background:var(--hover); }
+  .hbtn.primary { background:var(--fg); color:var(--panel); border-color:var(--fg); font-weight:500; }
+  .hbtn.primary:hover { opacity:.9; }
+  .hbtn:disabled { opacity:.5; cursor:not-allowed; }
+  .title a { color:inherit; text-decoration:none; } .title a:hover { text-decoration:underline; }
+  .who { display:flex; align-items:center; gap:8px; margin:0; font-size:12px; color:var(--muted); }
+  .link { border:0; background:none; padding:0; color:var(--accent); cursor:pointer; font-size:12px; }
+  .link:hover { text-decoration:underline; }
+  body.mr .card .dl .lo, body.mr .card .dl .ln { cursor:pointer; }
+  body.mr .card .dl .lo:hover, body.mr .card .dl .ln:hover { background:var(--accent-bg); color:var(--accent); }
+  .dl.has-c .lo { box-shadow:inset 3px 0 0 var(--accent); }
+  .thread, .composer { margin:4px 10px 8px 96px; border:1px solid var(--line-strong); border-radius:8px; background:var(--panel);
+                       font:13px/1.45 'IBM Plex Sans', system-ui, sans-serif; color:var(--fg); cursor:auto; }
+  .thread.resolved { opacity:.65; }
+  .note { padding:8px 10px; } .note + .note { border-top:1px solid var(--line); }
+  .nh { font-size:12px; color:var(--muted); margin-bottom:2px; } .nh b { color:var(--fg); font-weight:600; }
+  .nb { white-space:pre-wrap; overflow-wrap:anywhere; }
+  .thread > .link { margin:0 10px 8px; }
+  .composer { padding:8px; display:flex; flex-direction:column; gap:6px; }
+  .composer textarea { width:100%; min-height:64px; resize:vertical; padding:6px 8px; border:1px solid var(--line-strong);
+                       border-radius:6px; background:var(--bg); color:var(--fg); font:13px/1.4 'IBM Plex Sans', system-ui, sans-serif; }
+  .composer .row { display:flex; gap:8px; align-items:center; justify-content:flex-end; }
+  .composer .hint { font-size:12px; color:var(--muted); }
+  .composer .err { font-size:12px; color:var(--del-fg); margin-right:auto; }
+  #ov .thread, #ov .composer { margin:8px 0; }
+  .toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); max-width:90vw; padding:10px 14px; border-radius:8px;
+           background:var(--fg); color:var(--panel); font-size:13px; z-index:20; }
+
   @media (max-width: 1100px) {
     body { overflow:auto; }
     .panes { grid-template-columns:minmax(0, 1fr); }
