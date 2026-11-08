@@ -40,22 +40,22 @@ function shell(title: string, body: string): string {
   a { color:var(--accent); }
 </style>
 </head>
-<body><main><div class="brand">${LOGO}<span>gitmap</span></div>${body}</main></body>
+<body><main><div class="brand">${LOGO}<span>diffmap</span></div>${body}</main></body>
 </html>`;
 }
 
 export function signInPage(gitlabUrl: string, returnTo: string): string {
   return shell(
-    "Sign in · gitmap",
+    "Sign in · diffmap",
     `<h1>Review merge requests as a map</h1>
-<p>Sign in with your GitLab account at <code>${esc(gitlabUrl)}</code>. gitmap only sees what you can see in GitLab.</p>
+<p>Sign in with your GitLab account at <code>${esc(gitlabUrl)}</code>. diffmap only sees what you can see in GitLab.</p>
 <a class="btn" href="/auth/login?returnTo=${encodeURIComponent(returnTo)}">Sign in with GitLab</a>`
   );
 }
 
 export function homePage(user: Person, gitlabUrl: string, error = ""): string {
   return shell(
-    "gitmap",
+    "diffmap",
     `<h1>Open a merge request</h1>
 <p>Paste a merge request link from GitLab. Tip: you can also replace <code>${esc(gitlabUrl.replace(/^https?:\/\//, ""))}</code> with this site's address in any merge request URL.</p>
 <form method="get" action="/go">
@@ -70,7 +70,7 @@ export function homePage(user: Person, gitlabUrl: string, error = ""): string {
 }
 
 export function errorPage(title: string, message: string, back = "/"): string {
-  return shell(`${title} · gitmap`, `<h1>${esc(title)}</h1><p>${esc(message)}</p><a class="btn" href="${esc(back)}">Back</a>`);
+  return shell(`${title} · diffmap`, `<h1>${esc(title)}</h1><p>${esc(message)}</p><a class="btn" href="${esc(back)}">Back</a>`);
 }
 
 /**
@@ -79,7 +79,7 @@ export function errorPage(title: string, message: string, back = "/"): string {
  */
 export function loadingPage(title: string, statusUrl: string, status: PreparingStatus): string {
   return shell(
-    `${title} · gitmap`,
+    `${title} · diffmap`,
     `<style>
   .steps { list-style:none; padding:0; margin:20px 0 16px; display:flex; flex-direction:column; gap:10px; }
   .steps li { display:flex; align-items:center; gap:10px; color:var(--muted); }

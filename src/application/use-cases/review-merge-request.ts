@@ -135,7 +135,7 @@ export class ReviewMergeRequestUseCase {
     const promise = (async (): Promise<Cached> => {
       let look: IndexLookup | null = known ?? null;
       if (!look && host.findIndex) {
-        Object.assign(status, { step: "Looking for an exact index from CI", detail: "CI job gitmap-index" });
+        Object.assign(status, { step: "Looking for an exact index from CI", detail: "CI job diffmap-index" });
         look = await host.findIndex(mr).catch((): IndexLookup => ({ state: "none" }));
       }
       const gitDir = await this.repos.prepare(mr, token, (p) => {

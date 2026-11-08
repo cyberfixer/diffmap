@@ -1,7 +1,7 @@
 /**
  * Reads SCIP indexes (https://github.com/sourcegraph/scip): the "who defines and
  * who uses which symbol" files that compiler-based indexers write
- * (scip-typescript, scip-java, scip-clang, ...). Only the fields gitmap needs
+ * (scip-typescript, scip-java, scip-clang, ...). Only the fields diffmap needs
  * are decoded; the format is protobuf, read here by hand to avoid a dependency.
  *
  * Several index files can simply be concatenated (`cat a.scip b.scip`):

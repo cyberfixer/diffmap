@@ -21,7 +21,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const dataDir = mkdtempSync(join(tmpdir(), "gitmap-data-"));
+const dataDir = mkdtempSync(join(tmpdir(), "diffmap-data-"));
 
 let repo: FixtureRepo;
 let server: Server;
@@ -126,14 +126,14 @@ async function signIn(returnTo = "/"): Promise<string> {
   return cb.headers.get("set-cookie")!.split(";")[0];
 }
 
-describe("gitmap service", () => {
+describe("diffmap service", () => {
   it("sends you to GitLab to sign in when you open an MR, then back to it", async () => {
     const r = await get("/team/api/-/merge_requests/42");
     expect(r.status).toBe(302);
     expect(r.headers.get("location")).toBe("/auth/login?returnTo=%2Fteam%2Fapi%2F-%2Fmerge_requests%2F42");
 
     const cookie = await signIn("/team/api/-/merge_requests/42");
-    expect(cookie).toMatch(/^gitmap_session=/);
+    expect(cookie).toMatch(/^diffmap_session=/);
   });
 
   it("never writes the sign-in code or state to the logs, even when sign-in fails", async () => {

@@ -33,7 +33,7 @@ export interface AppDeps {
   log?: (msg: string) => void;
 }
 
-const COOKIE = "gitmap_session";
+const COOKIE = "diffmap_session";
 const MR_PAGE = /^\/(.+?)\/-\/merge_requests\/(\d+)\/?$/;
 const MR_API = /^\/api\/(.+?)\/-\/merge_requests\/(\d+)\/(discussions|approve|unapprove|viewed|status|discussions\/([^/]+)\/notes)$/;
 const MAX_BODY = 64 * 1024;
@@ -103,7 +103,7 @@ function readPosition(v: unknown): LinePosition | undefined {
   return { path: p.path, oldLine, newLine };
 }
 
-/** The gitmap web service: GitLab sign-in, merge request maps, comments and approvals. */
+/** The diffmap web service: GitLab sign-in, merge request maps, comments and approvals. */
 export function createApp(deps: AppDeps): Server {
   const { config } = deps;
   const sessions = deps.sessions ?? new SessionStore();

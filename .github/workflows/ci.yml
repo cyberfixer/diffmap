@@ -24,4 +24,4 @@ jobs:
     needs: test
     steps:
       - uses: actions/checkout@v4
-      - run: docker build -t gitmap .
+      - run: docker build -t diffmap .

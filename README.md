@@ -1,6 +1,6 @@
-# gitmap
+# diffmap
 
-Review code changes as a map. gitmap finds which functions a change touches and
+Review code changes as a map. diffmap finds which functions a change touches and
 where they are used, and shows everything on one page: the changed files, the
 code that calls them, and arrows between them. It feels like an editor, but
 focused on the change, so reviewers don't get lost.
@@ -40,12 +40,12 @@ git clone https://github.com/cyberfixer/diffmap.git
 cd diffmap
 npm install
 npm run build
-npm link        # makes the `git-map` command available everywhere
+npm link        # makes the `diffmap` command available everywhere
 ```
 
-`npm link` puts `git-map` on your PATH, pointing at this folder. After pulling
+`npm link` puts `diffmap` on your PATH, pointing at this folder. After pulling
 new changes, run `npm run build` again; no need to link again. To remove it:
-`npm unlink -g gitmap`.
+`npm unlink -g diffmap`.
 
 ### Use
 
@@ -53,23 +53,23 @@ Go to any git repository and run:
 
 ```bash
 cd /path/to/your/repo
-git-map main --format html > report.html
+diffmap main --format html > report.html
 ```
 
 Open `report.html` in your browser. More examples:
 
 ```bash
-git-map main --format html > report.html              # your branch vs main
-git-map main..feature/login --format html > r.html     # another branch vs main
-git-map HEAD~1 --format html > last.html               # just the last commit
-git-map main --scip index.scip --format html > r.html  # with exact calls
-git-map main > result.json                             # raw data instead of a page
+diffmap main --format html > report.html              # your branch vs main
+diffmap main..feature/login --format html > r.html     # another branch vs main
+diffmap HEAD~1 --format html > last.html               # just the last commit
+diffmap main --scip index.scip --format html > r.html  # with exact calls
+diffmap main > result.json                             # raw data instead of a page
 ```
 
 ### Options
 
 ```
-git-map <base>[..<head>] [--format json|html] [--depth N] [--scip FILE]...
+diffmap <base>[..<head>] [--format json|html] [--depth N] [--scip FILE]...
 ```
 
 | Option | Meaning | Default |
@@ -83,7 +83,7 @@ git-map <base>[..<head>] [--format json|html] [--depth N] [--scip FILE]...
 <details>
 <summary>Without npm link</summary>
 
-Run the script directly: `node /path/to/diffmap/bin/git-map.js main --format html > report.html`
+Run the script directly: `node /path/to/diffmap/bin/diffmap.js main --format html > report.html`
 </details>
 
 ## 2. GitLab service (Docker)
@@ -99,9 +99,9 @@ straight to GitLab.
 | Self-hosted, for everyone | **Admin Area → Applications → Add new application** |
 | gitlab.com, or just for you | **Edit profile → Applications → Add new application** |
 
-- **Name:** gitmap
+- **Name:** diffmap
 - **Redirect URI:** `<PUBLIC_URL>/auth/callback`
-  (e.g. `https://gitmap.company.com/auth/callback`, or `http://localhost:8080/auth/callback` to try it locally)
+  (e.g. `https://diffmap.company.com/auth/callback`, or `http://localhost:8080/auth/callback` to try it locally)
 - **Confidential:** yes
 - **Scopes:** `api`
 
@@ -123,13 +123,13 @@ Check it's running: `curl http://localhost:8080/healthz` prints `ok`.
 <summary>Plain Docker instead of compose</summary>
 
 ```bash
-docker build -t gitmap .
-docker run -d --name gitmap -p 8080:8080 -v gitmap-data:/data \
+docker build -t diffmap .
+docker run -d --name diffmap -p 8080:8080 -v diffmap-data:/data \
   -e GITLAB_URL=https://gitlab.company.com \
   -e GITLAB_CLIENT_ID=<application id> \
   -e GITLAB_CLIENT_SECRET=<secret> \
-  -e PUBLIC_URL=https://gitmap.company.com \
-  gitmap
+  -e PUBLIC_URL=https://diffmap.company.com \
+  diffmap
 ```
 </details>
 
@@ -138,20 +138,20 @@ docker run -d --name gitmap -p 8080:8080 -v gitmap-data:/data \
 | `GITLAB_URL` | Your GitLab, e.g. `https://gitlab.company.com` or `https://gitlab.com` |
 | `GITLAB_CLIENT_ID` | Application ID from step 1 |
 | `GITLAB_CLIENT_SECRET` | Secret from step 1 |
-| `PUBLIC_URL` | Address people use to open gitmap (must match the redirect URI) |
+| `PUBLIC_URL` | Address people use to open diffmap (must match the redirect URI) |
 | `PORT` | Port inside the container (default `8080`) |
-| `DATA_DIR` | Where gitmap keeps its files (default `/data`; keep it on a volume) |
+| `DATA_DIR` | Where diffmap keeps its files (default `/data`; keep it on a volume) |
 | `CACHE_DIR` | Where project code is kept (default `$DATA_DIR/repos`) |
 | `ANALYSIS_WORKERS` | Merge requests analysed at the same time (default `2`; about one per CPU core is fine if memory allows) |
-| `INDEX_JOB`, `INDEX_ARTIFACT` | CI job and file with the exact index (default `gitmap-index`, `index.scip`) |
+| `INDEX_JOB`, `INDEX_ARTIFACT` | CI job and file with the exact index (default `diffmap-index`, `index.scip`) |
 | `NODE_EXTRA_CA_CERTS`, `GIT_SSL_CAINFO` | Path to your CA file if GitLab uses an internal certificate |
 
 ### Step 3: open a merge request
 
 - Take any merge request URL and change only the host:
   `https://gitlab.company.com/team/api/-/merge_requests/42` →
-  `https://gitmap.company.com/team/api/-/merge_requests/42`
-- Or open gitmap's start page and paste the MR link.
+  `https://diffmap.company.com/team/api/-/merge_requests/42`
+- Or open diffmap's start page and paste the MR link.
 
 The first time, GitLab asks you to sign in. If the MR isn't ready yet, a
 progress screen shows the steps (download the code, analyse the changes) with
@@ -208,8 +208,8 @@ Drag or scroll to move the map, Ctrl+scroll to zoom, Esc to clear the selection.
 
 For exact calls outside TypeScript, let CI build an index with the language's own
 compiler. Copy the jobs you need from
-[`ci/gitmap-index.gitlab-ci.yml`](ci/gitmap-index.gitlab-ci.yml) into your project's
-`.gitlab-ci.yml`. The job must be called `gitmap-index` and save `index.scip`.
+[`ci/diffmap-index.gitlab-ci.yml`](ci/diffmap-index.gitlab-ci.yml) into your project's
+`.gitlab-ci.yml`. The job must be called `diffmap-index` and save `index.scip`.
 
 | Language | Indexer | Notes |
 |---|---|---|
@@ -218,7 +218,7 @@ compiler. Copy the jobs you need from
 | C, C++ | [scip-clang](https://github.com/sourcegraph/scip-clang) | needs `compile_commands.json` from your build |
 | Swift | none available yet | stays on name matching |
 
-- **Service:** gitmap finds the `gitmap-index` job for the MR's head commit by
+- **Service:** diffmap finds the `diffmap-index` job for the MR's head commit by
   itself. If the job is still running, the map opens with name matching (the
   header says *exact index still building*) and switches to exact calls on a later visit.
 - **CLI:** `--scip index.scip`. Several index files can be passed, or joined with

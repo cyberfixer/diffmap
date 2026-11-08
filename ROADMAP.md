@@ -1,8 +1,8 @@
-# gitmap Roadmap
+# diffmap Roadmap
 
 **Goal:** make code review feel as close as possible to working in an IDE, but focused on the changes, so the reviewer never gets lost.
 
-**What gitmap does today:** you give it two git refs (CLI) or open a GitLab merge request (service). It finds the changed lines, works out which function, method, class or template each line belongs to, finds who uses them, and shows it all as an interactive map: changed files as cards, callers outside the change shown in full, arrows to the exact lines. On GitLab you can comment, reply, approve and mark functions as viewed.
+**What diffmap does today:** you give it two git refs (CLI) or open a GitLab merge request (service). It finds the changed lines, works out which function, method, class or template each line belongs to, finds who uses them, and shows it all as an interactive map: changed files as cards, callers outside the change shown in full, arrows to the exact lines. On GitLab you can comment, reply, approve and mark functions as viewed.
 
 ---
 
@@ -26,7 +26,7 @@
 - JavaScript, Python, Java, Go, C#, PHP, Ruby, Rust, Kotlin, Swift, Scala, C and C++ through tree-sitter (symbols, calls matched by name, highlighting). TypeScript keeps the TypeScript compiler (exact). Other changed text files show as plain cards.
 
 ### 11. Exact calls from CI indexes — DONE
-- SCIP indexes (scip-typescript, scip-java incl. Kotlin, scip-clang) from a `gitmap-index` CI job or `--scip`. Files the index covers get exact calls and "implements" links; the header says whether calls are exact.
+- SCIP indexes (scip-typescript, scip-java incl. Kotlin, scip-clang) from a `diffmap-index` CI job or `--scip`. Files the index covers get exact calls and "implements" links; the header says whether calls are exact.
 
 ### 12. GitLab service — DONE
 - Docker image; sign in with GitLab (self-hosted or gitlab.com); open an MR by swapping the host or pasting the link.
@@ -51,7 +51,7 @@
 ## Needs a real test
 
 - The service against a real GitLab (sign-in, comments, approve, progress screen on a big project).
-- `ci/gitmap-index.gitlab-ci.yml` in a real pipeline.
+- `ci/diffmap-index.gitlab-ci.yml` in a real pipeline.
 - Real `scip-java` (Java, Kotlin) and `scip-clang` indexes; so far only scip-typescript was run for real.
 
 ---
@@ -69,7 +69,7 @@
 - `handler = () => {...}` inside a class is not recognised (only `const x = () =>` is).
 
 ### 16. "Viewed" resets when a function changes again
-- Today a function stays marked as viewed even if a later push changes it. GitLab resets its own "viewed" in that case; gitmap should too.
+- Today a function stays marked as viewed even if a later push changes it. GitLab resets its own "viewed" in that case; diffmap should too.
 
 ### 17. Clearer waiting and capacity
 - Show "waiting for N other merge requests" on the progress screen when all analysis slots are busy (today it already says "Analysing").
@@ -92,8 +92,8 @@
 - No SCIP indexer exists for Swift yet. Possible later through Swift's own index store, or if an indexer appears.
 
 ### 5. Small polish
-- `npm install` should build `dist/`, so `git-map` works right away. (A `prepare` script would break the Docker build as it is; needs `npm ci --ignore-scripts` there.)
-- A test that runs the real `git-map` command end to end.
+- `npm install` should build `dist/`, so `diffmap` works right away. (A `prepare` script would break the Docker build as it is; needs `npm ci --ignore-scripts` there.)
+- A test that runs the real `diffmap` command end to end.
 
 ---
 

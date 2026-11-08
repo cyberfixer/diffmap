@@ -1,5 +1,5 @@
 /**
- * What gitmap needs from a code host (GitLab today) to review a merge request:
+ * What diffmap needs from a code host (GitLab today) to review a merge request:
  * its details, its comment threads, and approvals. Language- and host-neutral.
  */
 

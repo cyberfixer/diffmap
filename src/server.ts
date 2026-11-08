@@ -9,7 +9,7 @@ import { configFromEnv } from "./interfaces/server/config.js";
 import { createApp } from "./interfaces/server/server.js";
 import { SessionStore } from "./interfaces/server/sessions.js";
 
-/** Entry point of the gitmap web service (see README: "GitLab service"). */
+/** Entry point of the diffmap web service (see README: "GitLab service"). */
 let config;
 try {
   config = configFromEnv();
@@ -41,5 +41,5 @@ const app = createApp({
 });
 
 app.listen(config.port, () => {
-  console.log(`gitmap service on port ${config.port}, signing in with ${config.gitlabUrl}, public at ${config.publicUrl}`);
+  console.log(`diffmap service on port ${config.port}, signing in with ${config.gitlabUrl}, public at ${config.publicUrl}`);
 });

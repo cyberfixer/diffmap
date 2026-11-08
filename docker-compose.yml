@@ -1,16 +1,16 @@
 # Settings come from .env (copy .env.example to .env and fill it in).
 services:
-  gitmap:
+  diffmap:
     build: .
-    image: gitmap:latest
+    image: diffmap:latest
     restart: unless-stopped
     ports:
       - "8080:8080"
     env_file: .env
     volumes:
-      - gitmap-data:/data
+      - diffmap-data:/data
       # If GitLab uses an internal CA, mount it and set the CA paths in .env:
       # - ./certs:/certs:ro
 
 volumes:
-  gitmap-data:
+  diffmap-data:

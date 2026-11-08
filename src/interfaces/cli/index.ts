@@ -8,9 +8,9 @@ import { renderHtml } from "../html/render-html.js";
 
 function usage(): void {
   console.error(
-    "Usage: git-map <base>[..<head>] [--format json|html] [--depth N] [--scip index.scip]...\n\n" +
+    "Usage: diffmap <base>[..<head>] [--format json|html] [--depth N] [--scip index.scip]...\n\n" +
       "  --scip FILE   exact calls from a SCIP index (scip-typescript, scip-java, scip-clang); repeatable\n\n" +
-      "Examples:\n  git-map main\n  git-map main..HEAD\n  git-map main --format html > report.html\n  git-map main --scip index.scip --format html > report.html"
+      "Examples:\n  diffmap main\n  diffmap main..HEAD\n  diffmap main --format html > report.html\n  diffmap main --scip index.scip --format html > report.html"
   );
 }
 

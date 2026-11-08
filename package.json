@@ -1,5 +1,5 @@
 {
-  "name": "gitmap",
+  "name": "diffmap",
   "version": "0.1.0",
   "description": "See which functions a code change touches and where they are used, as a map. CLI and GitLab merge request service.",
   "private": true,
@@ -18,7 +18,7 @@
     "node": ">=20"
   },
   "bin": {
-    "git-map": "bin/git-map.js"
+    "diffmap": "bin/diffmap.js"
   },
   "main": "dist/index.js",
   "scripts": {

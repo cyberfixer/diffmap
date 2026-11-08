@@ -16,7 +16,7 @@ export interface FixtureRepo {
 
 /** Create a temporary git repository for tests. Returns a FixtureRepo handle. */
 export function createFixtureRepo(): FixtureRepo {
-  const dir = mkdtempSync(join(tmpdir(), "gitmap-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "diffmap-test-"));
 
   function git(...args: string[]): string {
     const result = spawnSync("git", args, {

@@ -13,7 +13,7 @@ import {
 
 type Fetch = typeof fetch;
 
-// The parts of GitLab's REST API responses that gitmap reads.
+// The parts of GitLab's REST API responses that diffmap reads.
 interface GlUser { name: string; username: string }
 interface GlNote {
   id: number;
@@ -57,7 +57,7 @@ export class GitLabClient implements MergeRequestHostPort {
     private readonly token: () => Promise<string>,
     private readonly fetchImpl: Fetch = fetch,
     /** CI job that builds the index, and the artifact file it saves. */
-    private readonly indexJob = { name: "gitmap-index", artifact: "index.scip" },
+    private readonly indexJob = { name: "diffmap-index", artifact: "index.scip" },
   ) {}
 
   private mrPath(projectPath: string, iid: number): string {
@@ -82,7 +82,7 @@ export class GitLabClient implements MergeRequestHostPort {
   }
 
   /**
-   * The index from the newest successful `gitmap-index` job of a pipeline for
+   * The index from the newest successful `diffmap-index` job of a pipeline for
    * exactly the MR's head commit (an index of other code would point at wrong lines).
    */
   async findIndex(mr: MergeRequestInfo): Promise<IndexLookup> {

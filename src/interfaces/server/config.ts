@@ -24,7 +24,7 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ServerConfi
     dataDir: env.DATA_DIR ?? "/data",
     cacheDir: env.CACHE_DIR ?? `${env.DATA_DIR ?? "/data"}/repos`,
     analysisWorkers: Math.max(1, Number(env.ANALYSIS_WORKERS ?? 2) || 2),
-    indexJob: env.INDEX_JOB ?? "gitmap-index",
+    indexJob: env.INDEX_JOB ?? "diffmap-index",
     indexArtifact: env.INDEX_ARTIFACT ?? "index.scip",
   };
 }

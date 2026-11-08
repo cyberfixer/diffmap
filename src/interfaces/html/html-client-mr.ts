@@ -1,13 +1,13 @@
 /**
  * Browser script added only when the page shows a GitLab merge request:
  * shows existing comment threads on their lines, lets the reviewer comment on
- * any line (click its line number) or reply, and approve. Talks to the gitmap
+ * any line (click its line number) or reply, and approve. Talks to the diffmap
  * server, which calls GitLab as the signed-in user.
  * Kept free of template-literal syntax so it can live in a TS string.
  */
 export const MR_CLIENT_SCRIPT = `
 (function () {
-  var M = GITMAP.mr, G = window.gitmap;
+  var M = DIFFMAP.mr, G = window.diffmap;
   if (!M || !G) return;
 
   function byId(i) { return document.getElementById(i); }

@@ -126,7 +126,7 @@ describe("TypeScript symbol analysis", () => {
 
   it("marks a new file's function as added", () => {
     repo = createFixtureRepo();
-    repo.write("README.md", "# gitmap\n");
+    repo.write("README.md", "# diffmap\n");
     repo.commit("initial");
 
     repo.write("src/new.ts", `export function newThing(): void {\n  console.log('hello');\n}\n`);

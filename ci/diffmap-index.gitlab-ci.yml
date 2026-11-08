@@ -1,17 +1,17 @@
-# gitmap: exact calls from a compiler-made index (SCIP).
+# diffmap: exact calls from a compiler-made index (SCIP).
 #
-# Copy the jobs you need into your project's .gitlab-ci.yml. gitmap looks for a
-# successful job named "gitmap-index" in a pipeline for the merge request's head
-# commit and reads its artifact "index.scip". Without it, gitmap still works,
+# Copy the jobs you need into your project's .gitlab-ci.yml. diffmap looks for a
+# successful job named "diffmap-index" in a pipeline for the merge request's head
+# commit and reads its artifact "index.scip". Without it, diffmap still works,
 # matching calls by name.
 #
-# Keep ONE job named gitmap-index. For several languages, let one job per
-# language write its own .scip file and join them in gitmap-index (bottom).
+# Keep ONE job named diffmap-index. For several languages, let one job per
+# language write its own .scip file and join them in diffmap-index (bottom).
 
-stages: [gitmap]
+stages: [diffmap]
 
 # Run on branch pushes and merge request pipelines (both use the head commit).
-.gitmap-rules: &gitmap-rules
+.diffmap-rules: &diffmap-rules
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH
@@ -19,10 +19,10 @@ stages: [gitmap]
 # ── TypeScript / JavaScript (and Angular) ─────────────────────────────────────
 # Uses your tsconfig.json. For plain JavaScript projects add --infer-tsconfig.
 # Monorepos: add --yarn-workspaces or --pnpm-workspaces.
-gitmap-index:
-  stage: gitmap
+diffmap-index:
+  stage: diffmap
   image: node:20
-  <<: *gitmap-rules
+  <<: *diffmap-rules
   script:
     - npm ci
     - npx --yes @sourcegraph/scip-typescript@0.3.15 index --output index.scip
@@ -31,11 +31,11 @@ gitmap-index:
     expire_in: 30 days
 
 # ── Java / Kotlin (Maven, Gradle or sbt) ──────────────────────────────────────
-# Rename to gitmap-index if this is your only language.
-# gitmap-index-java:
-#   stage: gitmap
+# Rename to diffmap-index if this is your only language.
+# diffmap-index-java:
+#   stage: diffmap
 #   image: sourcegraph/scip-java:latest
-#   <<: *gitmap-rules
+#   <<: *diffmap-rules
 #   script:
 #     - scip-java index --output java.scip
 #   artifacts:
@@ -45,10 +45,10 @@ gitmap-index:
 # ── C / C++ ───────────────────────────────────────────────────────────────────
 # scip-clang needs compile_commands.json from your build
 # (CMake: -DCMAKE_EXPORT_COMPILE_COMMANDS=ON). Use an image that can build your code.
-# gitmap-index-cpp:
-#   stage: gitmap
+# diffmap-index-cpp:
+#   stage: diffmap
 #   image: your-build-image
-#   <<: *gitmap-rules
+#   <<: *diffmap-rules
 #   script:
 #     - cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 #     - curl -sSLo scip-clang https://github.com/sourcegraph/scip-clang/releases/download/v0.3.2/scip-clang-x86_64-linux
@@ -60,12 +60,12 @@ gitmap-index:
 
 # ── Several languages: join the files ─────────────────────────────────────────
 # SCIP files can simply be concatenated. Rename the TypeScript job above to
-# gitmap-index-ts (writing ts.scip), then:
-# gitmap-index:
-#   stage: gitmap
+# diffmap-index-ts (writing ts.scip), then:
+# diffmap-index:
+#   stage: diffmap
 #   image: alpine:3.20
-#   <<: *gitmap-rules
-#   needs: [gitmap-index-ts, gitmap-index-java]
+#   <<: *diffmap-rules
+#   needs: [diffmap-index-ts, diffmap-index-java]
 #   script:
 #     - cat *.scip > index.scip
 #   artifacts:

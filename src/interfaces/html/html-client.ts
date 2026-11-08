@@ -1,11 +1,11 @@
 /**
- * Browser script for the HTML report. Reads the GITMAP data object written by
+ * Browser script for the HTML report. Reads the DIFFMAP data object written by
  * renderHtml and wires up selection, folding, arrows, "viewed" progress,
  * pan and zoom. Kept free of template-literal syntax so it can live in a TS string.
  */
 export const CLIENT_SCRIPT = `
 (function () {
-  var D = GITMAP, syms = D.syms;
+  var D = DIFFMAP, syms = D.syms;
   var vp = byId('vp'), cv = byId('cv'), sv = byId('sv'), eg = byId('edges');
   var leftCards = qa('.card.in'), outCards = qa('.card.out');
   var GAP = 28, s = 1, tx = 0, ty = 0, W = 0, H = 0;
@@ -381,7 +381,7 @@ export const CLIENT_SCRIPT = `
   });
 
   // Hooks for the merge-request script (comments change card heights).
-  window.gitmap = { relayout: relayout, wasDrag: function () { return moved; } };
+  window.diffmap = { relayout: relayout, wasDrag: function () { return moved; } };
 
   updateViewed();
   relayout(); fit();

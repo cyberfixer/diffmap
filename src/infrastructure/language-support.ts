@@ -19,7 +19,7 @@ export interface LanguageSupport {
   parsers: SymbolParserPort[];
   graphs: CallGraphPort[];
   highlighters: SyntaxHighlighterPort[];
-  /** gitmap's symbols in many files at once (same names as the parsers give). */
+  /** diffmap's symbols in many files at once (same names as the parsers give). */
   listSymbols: (files: { path: string; source: string }[]) => Map<string, ListedSymbol[]>;
 }
 

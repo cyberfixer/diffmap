@@ -10,7 +10,7 @@ export interface ListedSymbol extends SymbolInfo {
   labels?: string[];
 }
 
-/** Finds gitmap's symbols (functions, classes...) in many files at once. */
+/** Finds diffmap's symbols (functions, classes...) in many files at once. */
 export type ListSymbols = (files: { path: string; source: string }[]) => Map<string, ListedSymbol[]>;
 
 const simple = (name: string): string => name.split(".").pop()!;
@@ -72,10 +72,10 @@ export class ScipCallGraph implements CallGraphPort {
       symbolsIn.set(f.path, list);
     }
 
-    // ── which gitmap symbol each SCIP definition belongs to ──
+    // ── which diffmap symbol each SCIP definition belongs to ──
     // Local symbols ("local 3") are only unique inside one file, so they are keyed by file.
     const keyOf = (path: string, symbol: string) => (isLocal(symbol) ? `${path}|${symbol}` : symbol);
-    const nodeOf = new Map<string, string>(); // SCIP symbol -> gitmap id
+    const nodeOf = new Map<string, string>(); // SCIP symbol -> diffmap id
     const resolve = (path: string, symbol: string): string | undefined => {
       const direct = nodeOf.get(keyOf(path, symbol));
       if (direct) return direct;

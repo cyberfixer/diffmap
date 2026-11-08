@@ -6,7 +6,7 @@ RUN npm ci
 COPY tsconfig.json ./
 COPY src ./src
 RUN npm run build && npm prune --omit=dev
-# Keep only the tree-sitter grammars gitmap uses (see src/infrastructure/parsers/tree-sitter/languages.ts).
+# Keep only the tree-sitter grammars diffmap uses (see src/infrastructure/parsers/tree-sitter/languages.ts).
 RUN cd node_modules/tree-sitter-wasms/out && for f in *.wasm; do \
       case "$f" in tree-sitter-javascript.wasm|tree-sitter-python.wasm|tree-sitter-java.wasm|tree-sitter-go.wasm|\
         tree-sitter-c_sharp.wasm|tree-sitter-php.wasm|tree-sitter-ruby.wasm|tree-sitter-rust.wasm|tree-sitter-kotlin.wasm|\

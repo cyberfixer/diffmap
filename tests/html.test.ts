@@ -25,7 +25,7 @@ const row = (type: DiffLine["type"], n: number, text: string): DiffLine => ({
 });
 
 /** Pull the data object the page hands to its script. */
-const pageData = (html: string) => JSON.parse(html.match(/var GITMAP = (.*?);<\/script>/)![1]);
+const pageData = (html: string) => JSON.parse(html.match(/var DIFFMAP = (.*?);<\/script>/)![1]);
 
 describe("renderHtml", () => {
   // A 30-line file where only lines 4-5 changed; line 25 calls the changed method.
@@ -95,7 +95,7 @@ describe("renderHtml", () => {
     const html = renderHtml(result);
     expect(html).toContain("of 2 symbols");
     expect(html).toContain("Mark as viewed");
-    expect(pageData(html).key).toBe(`gitmap:viewed:${sha("a")}..${sha("b")}`);
+    expect(pageData(html).key).toBe(`diffmap:viewed:${sha("a")}..${sha("b")}`);
   });
 
   it("shows one card per changed file, colour-coded with both line numbers", () => {

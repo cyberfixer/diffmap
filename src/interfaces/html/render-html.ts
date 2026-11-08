@@ -392,7 +392,7 @@ export function renderHtml(
     : "";
 
   const data = {
-    key: `gitmap:viewed:${result.base}..${result.head}`,
+    key: `diffmap:viewed:${result.base}..${result.head}`,
     syms,
     leftX: MARGIN,
     leftW,
@@ -418,14 +418,14 @@ export function renderHtml(
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>gitmap · ${esc(title)}</title>
+<title>diffmap · ${esc(title)}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
 <style>${STYLE}</style>
 </head>
 <body class="show-out${mrPage ? " mr" : ""}">
 <header class="top">
-  <div class="brand"><svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2.5"></circle><circle cx="19" cy="6" r="2.5"></circle><circle cx="12" cy="18" r="2.5"></circle><path d="M7.5 6h9M6.5 8.2l4.2 7.6M17.5 8.2l-4.2 7.6"></path></svg><span>gitmap</span></div>
+  <div class="brand"><svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2.5"></circle><circle cx="19" cy="6" r="2.5"></circle><circle cx="12" cy="18" r="2.5"></circle><path d="M7.5 6h9M6.5 8.2l4.2 7.6M17.5 8.2l-4.2 7.6"></path></svg><span>diffmap</span></div>
   <div class="title"><div class="t">${mrPage ? `<a href="${esc(mrPage.mr.webUrl)}" title="Open in GitLab">${esc(title)}</a>` : esc(title)}</div><div class="s mono">${esc(sub)}</div></div>
   <div class="pills">
     <span class="pill mono"><span class="add">+${addedLines}</span><span class="del">−${removedLines}</span></span>
@@ -499,7 +499,7 @@ export function renderHtml(
     <div id="dt" hidden></div>
   </aside>
 </div>
-<script>var GITMAP = ${scriptJson(data)};</script>
+<script>var DIFFMAP = ${scriptJson(data)};</script>
 <script>${CLIENT_SCRIPT}</script>${mrPage ? `\n<script>${MR_CLIENT_SCRIPT}</script>` : ""}
 </body>
 </html>
@@ -526,12 +526,12 @@ function exactPill(result: AnalysisResult, indexState?: string): string {
   const x = result.exactness;
   if (!x || x.total === 0) return "";
   if (indexState === "pending" && x.exact < x.total) {
-    return `<span class="pill" title="The CI job gitmap-index is still running for this commit. Reload in a minute for exact calls.">Calls: by name · exact index still building</span>`;
+    return `<span class="pill" title="The CI job diffmap-index is still running for this commit. Reload in a minute for exact calls.">Calls: by name · exact index still building</span>`;
   }
   if (x.exact === x.total) {
     return `<span class="pill" title="Calls are resolved by a compiler (TypeScript, or an index from CI)">Calls: exact</span>`;
   }
-  const title = "Calls in some languages are matched by name, so two functions with the same name can both be linked. Add a gitmap-index CI job for exact results (see README).";
+  const title = "Calls in some languages are matched by name, so two functions with the same name can both be linked. Add a diffmap-index CI job for exact results (see README).";
   return x.exact === 0
     ? `<span class="pill" title="${title}">Calls: matched by name</span>`
     : `<span class="pill" title="${title}">Calls: exact in ${x.exact} of ${x.total} files</span>`;

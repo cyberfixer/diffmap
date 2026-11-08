@@ -6,7 +6,7 @@ import { FileViewedStore } from "../src/infrastructure/storage/file-viewed-store
 
 let dir = "";
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
-const tmp = () => (dir = mkdtempSync(join(tmpdir(), "gitmap-store-")));
+const tmp = () => (dir = mkdtempSync(join(tmpdir(), "diffmap-store-")));
 
 describe("viewed marks", () => {
   it("are kept per user and merge request, across restarts", async () => {

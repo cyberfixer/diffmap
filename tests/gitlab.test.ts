@@ -152,11 +152,11 @@ describe("finding the exact index from CI", () => {
   const P = "/api/v4/projects/team%2Fapi";
   const mr = { projectPath: "team/api", iid: 42, diffRefs: { baseSha: "b", headSha: head, startSha: "s" } } as MergeRequestInfo;
 
-  it("downloads index.scip from the newest successful gitmap-index job for the head commit", async () => {
+  it("downloads index.scip from the newest successful diffmap-index job for the head commit", async () => {
     const f = fakeFetch({
       [`GET ${P}/pipelines?sha=${head}&order_by=id&sort=desc&per_page=10`]: () => [200, [{ id: 9 }, { id: 8 }]],
       [`GET ${P}/pipelines/9/jobs?per_page=100`]: () => [200, [{ id: 90, name: "test", status: "success" }]],
-      [`GET ${P}/pipelines/8/jobs?per_page=100`]: () => [200, [{ id: 80, name: "gitmap-index", status: "success" }]],
+      [`GET ${P}/pipelines/8/jobs?per_page=100`]: () => [200, [{ id: 80, name: "diffmap-index", status: "success" }]],
       [`GET ${P}/jobs/80/artifacts/index.scip`]: () => [200, new Uint8Array([1, 2, 3])],
     });
     const r = await new GitLabClient("https://gitlab.test", async () => "t", f.impl).findIndex(mr);
@@ -166,7 +166,7 @@ describe("finding the exact index from CI", () => {
   it("says pending while the job runs, and none when there is no such job", async () => {
     const running = fakeFetch({
       [`GET ${P}/pipelines?sha=${head}&order_by=id&sort=desc&per_page=10`]: () => [200, [{ id: 9 }]],
-      [`GET ${P}/pipelines/9/jobs?per_page=100`]: () => [200, [{ id: 90, name: "gitmap-index", status: "running" }]],
+      [`GET ${P}/pipelines/9/jobs?per_page=100`]: () => [200, [{ id: 90, name: "diffmap-index", status: "running" }]],
     });
     expect(await new GitLabClient("https://gitlab.test", async () => "t", running.impl).findIndex(mr)).toEqual({ state: "pending" });
 
@@ -229,7 +229,7 @@ describe("GitRepoCache", () => {
     remote.git("update-ref", "refs/merge-requests/5/head", head);
     remote.git("checkout", "-q", "main");
 
-    cacheDir = mkdtempSync(join(tmpdir(), "gitmap-cache-"));
+    cacheDir = mkdtempSync(join(tmpdir(), "diffmap-cache-"));
     const mr: MergeRequestInfo = {
       projectPath: "team/api", iid: 5, title: "t", webUrl: "", state: "opened",
       author: { name: "a", username: "a" }, sourceBranch: "feature", targetBranch: "main",
