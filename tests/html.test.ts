@@ -226,3 +226,17 @@ describe("file card header", () => {
     expect(renderHtml(result)).toContain("aaaaaaa..bbbbbbb");
   });
 });
+
+describe("light / dark toggle", () => {
+  const page = renderHtml({ base: sha("a"), head: sha("b"), symbols: [], nodes: [], edges: [], files: [] });
+
+  it("has a theme button and applies a saved choice before the page paints", () => {
+    expect(page).toContain('id="theme"');
+    expect(page.indexOf('localStorage.getItem("diffmap:theme")')).toBeLessThan(page.indexOf("<body"));
+  });
+
+  it("has colours for the system setting and for an explicit light or dark choice", () => {
+    expect(page).toMatch(/@media \(prefers-color-scheme: dark\) \{\s*:root:not\(\[data-theme="light"\]\)/);
+    expect(page).toContain(':root[data-theme="dark"] {');
+  });
+});

@@ -75,9 +75,6 @@
 - Default `ANALYSIS_WORKERS` to the number of CPU cores instead of 2.
 - Keep more than the last 20 analysed MR versions, or save them to disk so they survive a restart.
 
-### 18. Compiler errors at call sites
-- The design shows errors like "TS2554: Expected 2 arguments" next to callers that break. Possible for TypeScript with the type checker, and for other languages from CI.
-
 ### 19. Finding your way in big changes
 - Search for a file or function; a minimap of the canvas.
 
@@ -98,4 +95,4 @@
 
 ## Suggested order
 
-Then the real tests above. Then 4 → 16 → 17, which make day-to-day reviews more accurate. 18, 19, 7, 9 and 20 after that, in any order.
+Then the real tests above. Then 4 → 16 → 17, which make day-to-day reviews more accurate. 19, 7, 9 and 20 after that, in any order.

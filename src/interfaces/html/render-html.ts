@@ -6,6 +6,7 @@ import type { CallSite, GraphNode } from "../../domain/graph.js";
 import type { DiffLine } from "../../domain/symbol.js";
 import { STYLE } from "./html-style.js";
 import { CLIENT_SCRIPT } from "./html-client.js";
+import { THEME_BOOT, THEME_BUTTON } from "./theme.js";
 import { MR_CLIENT_SCRIPT } from "./html-client-mr.js";
 import type {
   Approvals,
@@ -419,6 +420,7 @@ export function renderHtml(
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>diffmap · ${esc(title)}</title>
+<script>${THEME_BOOT}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
 <style>${STYLE}</style>
@@ -430,6 +432,7 @@ export function renderHtml(
   <div class="pills">
     <span class="pill mono"><span class="add">+${addedLines}</span><span class="del">−${removedLines}</span></span>
     <span class="pill">${views.length} file${views.length === 1 ? "" : "s"} · ${changed.length} symbol${changed.length === 1 ? "" : "s"}</span>
+    ${THEME_BUTTON}
     ${warnPill}
     ${exactPill(result, mrPage?.indexState)}
     ${mrPage ? mrActions(mrPage) : ""}

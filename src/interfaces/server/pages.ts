@@ -1,8 +1,11 @@
 import type { Person } from "../../application/ports/merge-request.port.js";
 import type { PreparingStatus } from "../../application/use-cases/review-merge-request.js";
+import { THEME_BOOT, THEME_BUTTON } from "../html/theme.js";
 
 const esc = (s: string): string =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+const DARK = "--bg:#141413; --panel:#1C1C1A; --line:#2F2E2B; --line-strong:#45443F; --fg:#ECEBE6; --muted:#A3A199; --accent:#7AA2F7; --err:#F28B82;";
 
 const LOGO = `<svg aria-hidden="true" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2.5"></circle><circle cx="19" cy="6" r="2.5"></circle><circle cx="12" cy="18" r="2.5"></circle><path d="M7.5 6h9M6.5 8.2l4.2 7.6M17.5 8.2l-4.2 7.6"></path></svg>`;
 
@@ -14,12 +17,18 @@ function shell(title: string, body: string): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(title)}</title>
+<script>${THEME_BOOT}</script>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
 <style>
   :root { --bg:#F6F6F3; --panel:#FFFFFF; --line:#E2E1DC; --line-strong:#C9C8C1; --fg:#1C1C1A; --muted:#5F5E58; --accent:#2457C5; --err:#8E1B12; }
   @media (prefers-color-scheme: dark) {
-    :root { --bg:#141413; --panel:#1C1C1A; --line:#2F2E2B; --line-strong:#45443F; --fg:#ECEBE6; --muted:#A3A199; --accent:#7AA2F7; --err:#F28B82; }
+    :root:not([data-theme="light"]) { ${DARK} }
   }
+  :root[data-theme="dark"] { ${DARK} }
+  .brand .theme { margin-left:auto; display:inline-flex; align-items:center; gap:6px; min-height:34px; padding:0 10px;
+                  border:1px solid var(--line-strong); border-radius:8px; background:var(--panel); color:var(--muted);
+                  font:13px 'IBM Plex Sans', system-ui, sans-serif; font-weight:400; cursor:pointer; }
+  .brand .theme svg { width:15px; height:15px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
   * { box-sizing:border-box; }
   body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px 16px;
          background:var(--bg); color:var(--fg); font:15px/1.5 'IBM Plex Sans', system-ui, sans-serif; }
@@ -40,7 +49,7 @@ function shell(title: string, body: string): string {
   a { color:var(--accent); }
 </style>
 </head>
-<body><main><div class="brand">${LOGO}<span>diffmap</span></div>${body}</main></body>
+<body><main><div class="brand">${LOGO}<span>diffmap</span>${THEME_BUTTON}</div>${body}</main></body>
 </html>`;
 }
 

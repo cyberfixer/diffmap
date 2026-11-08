@@ -1,3 +1,15 @@
+/** Dark-mode colour tokens, used for the system setting and for an explicit "dark" choice. */
+const DARK_TOKENS = `
+--bg:#141413; --panel:#1C1C1A; --side:#191917; --line:#2F2E2B; --line-strong:#45443F;
+--fg:#ECEBE6; --fg2:#DAD9D3; --muted:#A3A199; --faint:#7D7B74; --chip:#262522; --hover:#2A2926;
+--add-bg:#10291A; --add-gut:#173823; --add-fg:#6FD08C; --add-edge:#2F6B43;
+--del-bg:#33161A; --del-gut:#4A1E22; --del-fg:#F28B82; --del-edge:#7A3A3A;
+--use-bg:#15233D; --use-gut:#1D3157; --accent:#7AA2F7; --accent-bg:#1A2A4A; --use-edge:#3D5A94;
+--edge:#A3A199; --dots:#2A2926;
+--tk-keyword:#ff7b72; --tk-string:#a5d6ff; --tk-comment:#8b949e; --tk-number:#79c0ff;
+--tk-function:#d2a8ff; --tk-type:#ffa657; --tk-decorator:#7ee787;
+`;
+
 /** Stylesheet for the HTML report: a three-panel review screen. */
 export const STYLE = `
   :root {
@@ -10,18 +22,14 @@ export const STYLE = `
     --tk-keyword:#cf222e; --tk-string:#0a3069; --tk-comment:#6e7781; --tk-number:#0550ae;
     --tk-function:#8250df; --tk-type:#953800; --tk-decorator:#116329;
   }
+  /* Dark colours: from the system setting, unless the reader picked light or dark (data-theme). */
   @media (prefers-color-scheme: dark) {
-    :root {
-      --bg:#141413; --panel:#1C1C1A; --side:#191917; --line:#2F2E2B; --line-strong:#45443F;
-      --fg:#ECEBE6; --fg2:#DAD9D3; --muted:#A3A199; --faint:#7D7B74; --chip:#262522; --hover:#2A2926;
-      --add-bg:#10291A; --add-gut:#173823; --add-fg:#6FD08C; --add-edge:#2F6B43;
-      --del-bg:#33161A; --del-gut:#4A1E22; --del-fg:#F28B82; --del-edge:#7A3A3A;
-      --use-bg:#15233D; --use-gut:#1D3157; --accent:#7AA2F7; --accent-bg:#1A2A4A; --use-edge:#3D5A94;
-      --edge:#A3A199; --dots:#2A2926;
-      --tk-keyword:#ff7b72; --tk-string:#a5d6ff; --tk-comment:#8b949e; --tk-number:#79c0ff;
-      --tk-function:#d2a8ff; --tk-type:#ffa657; --tk-decorator:#7ee787;
-    }
+    :root:not([data-theme="light"]) { ${DARK_TOKENS} }
   }
+  :root[data-theme="dark"] { ${DARK_TOKENS} }
+  :root { color-scheme: light dark; }
+  :root[data-theme="light"] { color-scheme: light; }
+  :root[data-theme="dark"] { color-scheme: dark; }
   * { box-sizing:border-box; }
   html, body { margin:0; height:100%; }
   body { background:var(--bg); color:var(--fg); font:14px/1.4 'IBM Plex Sans', system-ui, sans-serif;
@@ -91,6 +99,10 @@ export const STYLE = `
   .zoom button:hover { background:var(--hover); }
   .zoom span { min-width:52px; text-align:center; color:var(--fg2); line-height:34px;
                border-left:1px solid var(--line-strong); border-right:1px solid var(--line-strong); }
+  .theme { display:inline-flex; align-items:center; gap:6px; min-height:34px; padding:0 10px; border:1px solid var(--line-strong);
+           border-radius:8px; background:var(--panel); color:var(--fg2); font-size:13px; cursor:pointer; }
+  .theme:hover { background:var(--hover); }
+  .theme svg { width:15px; height:15px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
   .zoom .fit { font-size:13px; padding:0 10px; border-left:1px solid var(--line-strong); }
 
   #vp { flex:1; min-height:0; margin:0 20px; position:relative; overflow:hidden; cursor:grab; touch-action:none;
