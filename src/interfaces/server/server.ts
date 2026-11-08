@@ -12,6 +12,7 @@ import { renderHtml } from "../html/render-html.js";
 import type { ServerConfig } from "./config.js";
 import { errorPage, homePage, loadingPage, signInPage } from "./pages.js";
 import { SessionStore, type Session } from "./sessions.js";
+import { redactSecrets, sensitiveValues } from "./safe-log.js";
 
 export interface OAuthPort {
   authorizeUrl(state: string, challenge: string): string;
@@ -106,7 +107,9 @@ function readPosition(v: unknown): LinePosition | undefined {
 export function createApp(deps: AppDeps): Server {
   const { config } = deps;
   const sessions = deps.sessions ?? new SessionStore();
-  const log = deps.log ?? ((m: string) => console.log(m));
+  // Every log line goes through redactSecrets: no query string or sign-in code is ever written.
+  const write = deps.log ?? ((m: string) => console.log(m));
+  const log = (m: string, values: string[] = []) => write(redactSecrets(m, values));
   const secure = config.publicUrl.startsWith("https://");
   const refreshing = new WeakMap<Session, Promise<void>>();
 
@@ -273,7 +276,10 @@ export function createApp(deps: AppDeps): Server {
               ? "That merge request doesn't exist, or your GitLab account can't see it."
               : "GitLab returned an error.";
       }
-      if (status >= 500) log(`error: ${req.method} ${req.url}: ${err instanceof Error ? err.stack ?? err.message : String(err)}`);
+      if (status >= 500) {
+        const path = (req.url ?? "/").split("?")[0];
+        log(`error: ${req.method} ${path}: ${err instanceof Error ? err.stack ?? err.message : String(err)}`, sensitiveValues(req.url));
+      }
       if (res.headersSent) return res.end();
       if (isApi) return json(res, status, { error: message });
       if (status === 401) return redirect(res, `/auth/login?returnTo=${encodeURIComponent(safeReturn(req.url ?? "/"))}`);

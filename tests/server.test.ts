@@ -29,6 +29,7 @@ let base = "";
 let mr: MergeRequestInfo;
 const posted: NewComment[] = [];
 let approved = false;
+const logs: string[] = [];
 
 beforeAll(async () => {
   repo = createFixtureRepo();
@@ -75,7 +76,8 @@ beforeAll(async () => {
     oauth: {
       authorizeUrl: (state) => `https://gitlab.test/oauth/authorize?state=${state}`,
       exchange: async (code) => {
-        if (code !== "good") throw new Error("bad code");
+        // Like a careless upstream error that repeats the code it got.
+        if (code !== "good") throw new Error(`invalid_grant for code ${code} (sent code=${code})`);
         return { accessToken: "A", refreshToken: "R", expiresAt: Date.now() + 3600_000 };
       },
       refresh: async () => ({ accessToken: "A2", refreshToken: "R2", expiresAt: Date.now() + 3600_000 }),
@@ -85,7 +87,7 @@ beforeAll(async () => {
     review: new ReviewMergeRequestUseCase({ prepare: async () => repo.dir }, (dir, b, h) =>
       new AnalyzeRangeUseCase(new GitDiffReader(dir), new GitSourceReader(dir), [new TsMorphAdapter()], [new TsMorphCallGraph()]).execute(b, h),
     ),
-    log: () => {},
+    log: (m) => void logs.push(m),
   });
   await new Promise<void>((r) => server.listen(0, r));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -132,6 +134,20 @@ describe("gitmap service", () => {
 
     const cookie = await signIn("/team/api/-/merge_requests/42");
     expect(cookie).toMatch(/^gitmap_session=/);
+  });
+
+  it("never writes the sign-in code or state to the logs, even when sign-in fails", async () => {
+    const login = await get("/auth/login?returnTo=%2F");
+    const state = new URL(login.headers.get("location")!).searchParams.get("state")!;
+    const secretCode = "SECRETCODE-9f8e7d6c";
+    const r = await get(`/auth/callback?code=${secretCode}&state=${state}`);
+    expect(r.status).toBe(500);
+
+    const all = logs.join("\n");
+    expect(all).toContain("error: GET /auth/callback");
+    expect(all).not.toContain(secretCode);
+    expect(all).not.toContain(state);
+    expect(all).not.toMatch(/\?code=/);
   });
 
   it("refuses a callback with an unknown state", async () => {
