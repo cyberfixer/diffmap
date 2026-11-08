@@ -8,6 +8,9 @@
 
 ## Done
 
+### 15. Better name matching — DONE
+- Without an index, calls are narrowed to what the caller can reach: `self.x()`/`this.x()` → same class; `Svc.x()` or a variable with a written-down type → that class; else same file, then imported files or the same folder/package. Unreachable names are linked only when unique in the repo.
+
 ### 1. Wrong `added`/`removed` status — DONE
 - Status comes from whether the symbol exists in the whole base and head file, not just on the changed lines. Covered by tests.
 
@@ -58,10 +61,6 @@
 
 ## Next
 
-### 15. Better name matching (no CI needed)
-- **Problem:** without an index, a call to `update()` links to every function called `update`.
-- **Fix:** only link to what the calling file can see (its own file, what it imports, its own package in Go/Java/C#), and read `self.x()` / `this.x()` as "this class". Removes most wrong arrows with no setup.
-
 ### 4. `type` aliases are not symbols (rest of item 4)
 - Interfaces and enums are symbols now; TypeScript `type X = ...` still falls into `top-level`.
 
@@ -99,4 +98,4 @@
 
 ## Suggested order
 
-Then the real tests above. Then 15 → 4 → 3 → 16 → 17, which make day-to-day reviews more accurate. 18, 19, 7, 9 and 20 after that, in any order.
+Then the real tests above. Then 4 → 3 → 16 → 17, which make day-to-day reviews more accurate. 18, 19, 7, 9 and 20 after that, in any order.

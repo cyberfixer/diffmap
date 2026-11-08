@@ -12,6 +12,23 @@ export interface FoundCall {
   from: string; // qualified name of the enclosing symbol
   name: string; // the called name, e.g. "update" for svc.update(...)
   line: number;
+  /** What the call is made on: "svc" for svc.update(), "self" for this/self/$this, "" for a plain call. */
+  receiver: string;
+}
+
+const SELF = /^(this|self|\$this|@|Self|super)$/;
+
+/** The text before the called name: `self.repo.find(x)` -> "self.repo", `new Svc()` -> "". */
+export function receiverOf(callText: string, name: string): string {
+  const head = callText.split("(")[0];
+  const at = head.lastIndexOf(name);
+  if (at < 0) return "";
+  const r = head
+    .slice(0, at)
+    .replace(/(\?\.|\.|->|::|&)\s*$/, "")
+    .replace(/^\s*new\s+/, "")
+    .trim();
+  return SELF.test(r) ? "self" : r;
 }
 
 const CONTAINERS = new Set<SymbolKind>(["class", "struct", "interface", "enum", "trait", "module"]);
@@ -118,7 +135,9 @@ function listCalls(root: Node, spec: LanguageSpec, symbols: Found[]): FoundCall[
       for (const s of symbols) {
         if (s.start <= node.startIndex && node.endIndex <= s.end && (!best || s.end - s.start < best.end - best.start)) best = s;
       }
-      if (name && best) out.push({ from: best.info.name, name, line: node.startPosition.row + 1 });
+      if (name && best) {
+        out.push({ from: best.info.name, name, line: node.startPosition.row + 1, receiver: receiverOf(node.text, name) });
+      }
     }
     for (const child of node.namedChildren) walk(child);
   };
