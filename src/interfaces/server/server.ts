@@ -326,6 +326,9 @@ export function createApp(deps: AppDeps): Server {
       if (err instanceof HttpError) {
         status = err.status;
         message = err.message;
+      } else if (err instanceof HostError && err.userMessage) {
+        status = err.status;
+        message = err.userMessage;
       } else if (err instanceof HostError) {
         status = err.status === 401 ? 401 : err.status === 403 || err.status === 404 ? 404 : 502;
         message =

@@ -1,6 +1,8 @@
 import { ReviewMergeRequestUseCase } from "./application/use-cases/review-merge-request.js";
 import { GitLabClient } from "./infrastructure/gitlab/gitlab-client.js";
 import { GitLabOAuth } from "./infrastructure/gitlab/gitlab-oauth.js";
+import { GitHubClient } from "./infrastructure/github/github-client.js";
+import { GitHubOAuth } from "./infrastructure/github/github-oauth.js";
 import { GitRepoCache } from "./infrastructure/git/git-repo-cache.js";
 import { loadLanguageSupport } from "./infrastructure/language-support.js";
 import { FileViewedStore } from "./infrastructure/storage/file-viewed-store.js";
@@ -9,7 +11,7 @@ import { configFromEnv } from "./interfaces/server/config.js";
 import { createApp } from "./interfaces/server/server.js";
 import { SessionStore } from "./interfaces/server/sessions.js";
 
-/** Entry point of the diffmap web service (see README: "GitLab service"). */
+/** Entry point of the diffmap web service. One process serves one code host (CODE_HOST). */
 let config;
 try {
   config = configFromEnv();
@@ -26,18 +28,28 @@ setInterval(() => sessions.sweep(), 3600_000).unref();
 const app = createApp({
   config,
   sessions,
-  // Full mode: "Sign in with GitLab" through the GitLab application. View mode: none
+  // Full mode: sign in through the host's OAuth application. View mode: none
   // (people sign in with their own read-only token; no comments or approvals).
   oauth:
-    config.mode === "full"
-      ? new GitLabOAuth({
-          gitlabUrl: config.hostUrl,
-          clientId: config.clientId,
-          clientSecret: config.clientSecret,
-          redirectUri: `${config.publicUrl}/auth/callback`,
-        })
-      : undefined,
-  hostFor: (token) => new GitLabClient(config.hostUrl, token, fetch, { name: config.indexJob, artifact: config.indexArtifact }),
+    config.mode !== "full"
+      ? undefined
+      : config.codeHost === "github"
+        ? new GitHubOAuth({
+            githubUrl: config.hostUrl,
+            clientId: config.clientId,
+            clientSecret: config.clientSecret,
+            redirectUri: `${config.publicUrl}/auth/callback`,
+          })
+        : new GitLabOAuth({
+            gitlabUrl: config.hostUrl,
+            clientId: config.clientId,
+            clientSecret: config.clientSecret,
+            redirectUri: `${config.publicUrl}/auth/callback`,
+          }),
+  hostFor: (token) =>
+    config.codeHost === "github"
+      ? new GitHubClient(config.hostUrl, token, fetch, { name: config.indexJob, file: config.indexArtifact })
+      : new GitLabClient(config.hostUrl, token, fetch, { name: config.indexJob, artifact: config.indexArtifact }),
   review: new ReviewMergeRequestUseCase(new GitRepoCache(config.cacheDir), (gitDir, base, head, index) =>
     analyzer.analyze(gitDir, base, head, index),
   ),
@@ -46,6 +58,7 @@ const app = createApp({
 });
 
 app.listen(config.port, () => {
-  const mode = config.mode === "full" ? "full (GitLab sign-in, comments, approvals)" : "view-only (personal access tokens)";
-  console.log(`diffmap service on port ${config.port}, ${mode}, GitLab ${config.hostUrl}, public at ${config.publicUrl}`);
+  const name = config.host.name;
+  const mode = config.mode === "full" ? `full (${name} sign-in, comments, approvals)` : "view-only (personal access tokens)";
+  console.log(`diffmap service on port ${config.port}, ${mode}, ${name} ${config.hostUrl}, public at ${config.publicUrl}`);
 });

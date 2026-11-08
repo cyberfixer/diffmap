@@ -62,7 +62,8 @@ export class PositionRejectedError extends Error {}
 
 /** Raised for a failed call to the host; `status` is the HTTP status. */
 export class HostError extends Error {
-  constructor(message: string, readonly status: number) {
+  /** `userMessage`, when set, is safe and useful to show to the person as is. */
+  constructor(message: string, readonly status: number, readonly userMessage?: string) {
     super(message);
   }
 }
