@@ -44,8 +44,8 @@ These come first because everything later builds on this output.
 
 ### 8. HTML graph output — DONE (first version)
 - **Adds:** a shareable page showing changed functions and their callers as a graph.
-- **Status:** `--format html` draws a left-to-right flow map with an inline diff per changed symbol, pan/zoom, hover tracing, and dashed red arrows for calls into removed code.
-- **Next:** minimap/search for big diffs, file-level import edges, caller-of-caller depth defaults.
+- **Status:** `--format html` is a three-panel review screen (from the "Code change map" design): changed files and symbols on the left with "viewed" progress; a map in the middle with each changed file as a foldable card (whole file on demand) and, for the selected symbol, the whole calling functions outside the diff with arrows to each call line; details on the right (before/after, every place it is used). Branch names and commit count come from git.
+- **Next:** "implemented by" arrows (needs interface tracking), compiler errors at call sites, minimap/search for big diffs.
 
 ### 9. Nx support
 - **Adds:** understand Nx monorepo project boundaries, so callers are labelled by project.
