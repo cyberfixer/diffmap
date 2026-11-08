@@ -26,6 +26,7 @@ function fakeFetch(routes: Record<string, (body: unknown) => [number, unknown]>)
     const path = url.replace(/^https:\/\/gitlab\.test/, "");
     const route = routes[`${method} ${path}`];
     const [status, data] = route ? route(body && body.startsWith("{") ? JSON.parse(body) : body) : [404, { message: "404" }];
+    if (data instanceof Uint8Array) return new Response(data, { status });
     return new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
   }) as typeof fetch;
   return { impl, calls };
@@ -143,6 +144,34 @@ describe("GitLabClient", () => {
 
     expect(a).toEqual({ userHasApproved: true, userCanApprove: true, approvedBy: [{ name: "Me", username: "me" }] });
     expect(f.calls.find((c) => c.url.endsWith("/approve"))!.body).toBe(JSON.stringify({ sha: "h".repeat(40) }));
+  });
+});
+
+describe("finding the exact index from CI", () => {
+  const head = "h".repeat(40);
+  const P = "/api/v4/projects/team%2Fapi";
+  const mr = { projectPath: "team/api", iid: 42, diffRefs: { baseSha: "b", headSha: head, startSha: "s" } } as MergeRequestInfo;
+
+  it("downloads index.scip from the newest successful gitmap-index job for the head commit", async () => {
+    const f = fakeFetch({
+      [`GET ${P}/pipelines?sha=${head}&order_by=id&sort=desc&per_page=10`]: () => [200, [{ id: 9 }, { id: 8 }]],
+      [`GET ${P}/pipelines/9/jobs?per_page=100`]: () => [200, [{ id: 90, name: "test", status: "success" }]],
+      [`GET ${P}/pipelines/8/jobs?per_page=100`]: () => [200, [{ id: 80, name: "gitmap-index", status: "success" }]],
+      [`GET ${P}/jobs/80/artifacts/index.scip`]: () => [200, new Uint8Array([1, 2, 3])],
+    });
+    const r = await new GitLabClient("https://gitlab.test", async () => "t", f.impl).findIndex(mr);
+    expect(r).toEqual({ state: "found", data: new Uint8Array([1, 2, 3]) });
+  });
+
+  it("says pending while the job runs, and none when there is no such job", async () => {
+    const running = fakeFetch({
+      [`GET ${P}/pipelines?sha=${head}&order_by=id&sort=desc&per_page=10`]: () => [200, [{ id: 9 }]],
+      [`GET ${P}/pipelines/9/jobs?per_page=100`]: () => [200, [{ id: 90, name: "gitmap-index", status: "running" }]],
+    });
+    expect(await new GitLabClient("https://gitlab.test", async () => "t", running.impl).findIndex(mr)).toEqual({ state: "pending" });
+
+    const none = fakeFetch({ [`GET ${P}/pipelines?sha=${head}&order_by=id&sort=desc&per_page=10`]: () => [200, []] });
+    expect(await new GitLabClient("https://gitlab.test", async () => "t", none.impl).findIndex(mr)).toEqual({ state: "none" });
   });
 });
 
@@ -274,6 +303,32 @@ describe("ReviewMergeRequestUseCase", () => {
     release();
     await new Promise((r) => setTimeout(r, 10));
     expect((await uc.progress(host, "t", "team/api", 42)).state).toBe("ready");
+  });
+
+  it("uses the CI index when there is one, and picks it up later if it was still building", async () => {
+    const given: (Uint8Array | undefined)[] = [];
+    const uc = new ReviewMergeRequestUseCase({ prepare: async () => "/repo" }, async (_d, _b, _h, index) => {
+      given.push(index);
+      return { base: "b", head: "h", symbols: [], nodes: [], edges: [], files: [] };
+    });
+    let lookup: "pending" | "found" = "pending";
+    const { host } = fakeHost();
+    host.findIndex = async () => (lookup === "found" ? { state: "found", data: new Uint8Array([7]) } : { state: "pending" });
+
+    const first = await uc.open(host, "t", "team/api", 42, { wait: true });
+    expect(first.ready && first.indexState).toBe("pending");
+    expect(given).toEqual([undefined]);
+
+    lookup = "found";
+    const realNow = Date.now;
+    Date.now = () => realNow() + 61_000; // a minute later
+    try {
+      const second = await uc.open(host, "t", "team/api", 42, { wait: true });
+      expect(second.ready && second.indexState).toBe("found");
+      expect(given).toEqual([undefined, new Uint8Array([7])]);
+    } finally {
+      Date.now = realNow;
+    }
   });
 
   it("reports a failure once, then tries again", async () => {

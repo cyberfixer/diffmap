@@ -12,21 +12,21 @@ export class WorkerAnalyzer {
 
   constructor(private readonly max = 2) {}
 
-  async analyze(gitDir: string, base: string, head: string): Promise<AnalysisResult> {
+  async analyze(gitDir: string, base: string, head: string, index?: Uint8Array): Promise<AnalysisResult> {
     if (this.running >= this.max) await new Promise<void>((r) => this.waiting.push(r));
     this.running++;
     try {
-      return await this.run(gitDir, base, head);
+      return await this.run(gitDir, base, head, index);
     } finally {
       this.running--;
       this.waiting.shift()?.();
     }
   }
 
-  private run(gitDir: string, base: string, head: string): Promise<AnalysisResult> {
+  private run(gitDir: string, base: string, head: string, index?: Uint8Array): Promise<AnalysisResult> {
     return new Promise((resolve, reject) => {
       const w = new Worker(new URL("./analyze-worker.js", import.meta.url), {
-        workerData: { gitDir, base, head },
+        workerData: { gitDir, base, head, index },
         execArgv: [], // don't inherit flags meant for the main script
       });
       let done = false;

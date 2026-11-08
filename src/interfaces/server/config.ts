@@ -7,6 +7,8 @@ export interface ServerConfig {
   cacheDir: string; // where project git copies are kept
   dataDir: string; // "viewed" marks (and the repo cache by default)
   analysisWorkers: number; // analyses that may run at the same time
+  indexJob: string; // CI job that builds the exact index
+  indexArtifact: string; // the index file that job saves
 }
 
 /** Read settings from environment variables; throws with a clear list of what is missing. */
@@ -22,5 +24,7 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ServerConfi
     dataDir: env.DATA_DIR ?? "/data",
     cacheDir: env.CACHE_DIR ?? `${env.DATA_DIR ?? "/data"}/repos`,
     analysisWorkers: Math.max(1, Number(env.ANALYSIS_WORKERS ?? 2) || 2),
+    indexJob: env.INDEX_JOB ?? "gitmap-index",
+    indexArtifact: env.INDEX_ARTIFACT ?? "index.scip",
   };
 }

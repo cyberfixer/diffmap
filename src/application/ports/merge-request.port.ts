@@ -63,7 +63,15 @@ export class HostError extends Error {
   }
 }
 
+/** Result of looking for an exact index (SCIP) made by CI for the MR's head commit. */
+export type IndexLookup =
+  | { state: "found"; data: Uint8Array }
+  | { state: "pending" } // the CI job exists but has not finished
+  | { state: "none" }; // no such job for this commit
+
 export interface MergeRequestHostPort {
+  /** Optional: find the CI-built index for the MR's head commit. */
+  findIndex?(mr: MergeRequestInfo): Promise<IndexLookup>;
   currentUser(): Promise<Person>;
   getMergeRequest(projectPath: string, iid: number): Promise<MergeRequestInfo>;
   listDiscussions(projectPath: string, iid: number): Promise<ReviewDiscussion[]>;

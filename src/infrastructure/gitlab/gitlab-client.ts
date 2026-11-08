@@ -2,6 +2,7 @@ import {
   HostError,
   PositionRejectedError,
   type Approvals,
+  type IndexLookup,
   type MergeRequestHostPort,
   type MergeRequestInfo,
   type NewComment,
@@ -55,6 +56,8 @@ export class GitLabClient implements MergeRequestHostPort {
     private readonly baseUrl: string,
     private readonly token: () => Promise<string>,
     private readonly fetchImpl: Fetch = fetch,
+    /** CI job that builds the index, and the artifact file it saves. */
+    private readonly indexJob = { name: "gitmap-index", artifact: "index.scip" },
   ) {}
 
   private mrPath(projectPath: string, iid: number): string {
@@ -76,6 +79,37 @@ export class GitLabClient implements MergeRequestHostPort {
       throw new HostError(`GitLab ${method} ${path} failed (${res.status}): ${text.slice(0, 300)}`, res.status);
     }
     return (await res.json()) as T;
+  }
+
+  /**
+   * The index from the newest successful `gitmap-index` job of a pipeline for
+   * exactly the MR's head commit (an index of other code would point at wrong lines).
+   */
+  async findIndex(mr: MergeRequestInfo): Promise<IndexLookup> {
+    const project = `/projects/${encodeURIComponent(mr.projectPath)}`;
+    const pipelines = await this.call<{ id: number }[]>(
+      "GET",
+      `${project}/pipelines?sha=${mr.diffRefs.headSha}&order_by=id&sort=desc&per_page=10`,
+    );
+    let pending = false;
+    for (const p of pipelines) {
+      const jobs = await this.call<{ id: number; name: string; status: string }[]>(
+        "GET",
+        `${project}/pipelines/${p.id}/jobs?per_page=100`,
+      );
+      for (const j of jobs.filter((j) => j.name === this.indexJob.name)) {
+        if (j.status === "success") {
+          const res = await this.fetchImpl(
+            `${this.baseUrl.replace(/\/$/, "")}/api/v4${project}/jobs/${j.id}/artifacts/${this.indexJob.artifact}`,
+            { headers: { Authorization: `Bearer ${await this.token()}` } },
+          );
+          if (res.ok) return { state: "found", data: new Uint8Array(await res.arrayBuffer()) };
+        } else if (/^(created|pending|running|waiting_for_resource|preparing|scheduled)$/.test(j.status)) {
+          pending = true;
+        }
+      }
+    }
+    return { state: pending ? "pending" : "none" };
   }
 
   async currentUser(): Promise<Person> {

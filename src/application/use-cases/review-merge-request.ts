@@ -1,6 +1,7 @@
 import {
   PositionRejectedError,
   type Approvals,
+  type IndexLookup,
   type LinePosition,
   type MergeRequestHostPort,
   type MergeRequestInfo,
@@ -9,8 +10,14 @@ import {
 } from "../ports/merge-request.port.js";
 import type { AnalysisResult } from "../../domain/analysis-result.js";
 
-/** Runs the existing analysis on a local git directory (in a worker thread in production). */
-export type Analyze = (gitDir: string, base: string, head: string) => Promise<AnalysisResult> | AnalysisResult;
+/**
+ * Runs the existing analysis on a local git directory (in a worker thread in
+ * production), with exact calls from a SCIP index when CI made one.
+ */
+export type Analyze = (gitDir: string, base: string, head: string, index?: Uint8Array) => Promise<AnalysisResult> | AnalysisResult;
+
+/** Whether the CI index was used: found, still being built, or not set up. */
+export type IndexState = IndexLookup["state"] | "unsupported";
 
 export interface MergeRequestReview {
   ready: true;
@@ -18,6 +25,7 @@ export interface MergeRequestReview {
   result: AnalysisResult;
   discussions: ReviewDiscussion[];
   approvals: Approvals;
+  indexState: IndexState;
 }
 
 /** How far along getting an MR ready is, for the progress screen. */
@@ -41,10 +49,18 @@ export interface CommentRequest {
 
 interface Job {
   status: PreparingStatus;
-  promise: Promise<AnalysisResult>;
+  promise: Promise<Cached>;
+}
+
+interface Cached {
+  result: AnalysisResult;
+  indexState: IndexState;
+  checkedAt: number; // when we last looked for a CI index
 }
 
 const MAX_CACHED = 20;
+/** Without an index, look again this often (a CI job may finish after the first visit). */
+const RECHECK_MS = 60_000;
 const keyOf = (mr: MergeRequestInfo) => `${mr.projectPath}@${mr.diffRefs.baseSha}..${mr.diffRefs.headSha}`;
 
 /**
@@ -59,7 +75,7 @@ export class ReviewMergeRequestUseCase {
   constructor(
     private readonly repos: RepoCachePort,
     private readonly analyze: Analyze,
-    private readonly cache = new Map<string, AnalysisResult>(),
+    private readonly cache = new Map<string, Cached>(),
   ) {}
 
   /**
@@ -75,36 +91,53 @@ export class ReviewMergeRequestUseCase {
   ): Promise<MergeRequestReview | { ready: false; mr: MergeRequestInfo; status: PreparingStatus }> {
     // Read the MR first: this also checks the user may see the project.
     const mr = await host.getMergeRequest(projectPath, iid);
-    let result = this.cache.get(keyOf(mr));
-    if (!result) {
-      const job = this.start(mr, token);
+    let cached = this.cache.get(keyOf(mr));
+    // Analysed without an index? See whether CI has made one since.
+    if (cached && cached.indexState !== "found" && cached.indexState !== "unsupported" && Date.now() - cached.checkedAt > RECHECK_MS) {
+      cached.checkedAt = Date.now();
+      const look = await host.findIndex!(mr).catch((): IndexLookup => ({ state: "none" }));
+      cached.indexState = look.state;
+      if (look.state === "found") {
+        const job = this.start(mr, token, host, look);
+        if (!opts.wait) return { ready: false, mr, status: job.status };
+        cached = await job.promise;
+      }
+    }
+    if (!cached) {
+      const job = this.start(mr, token, host);
       if (!opts.wait) return { ready: false, mr, status: job.status };
-      result = await job.promise;
+      cached = await job.promise;
     }
     const [discussions, approvals] = await Promise.all([
       host.listDiscussions(mr.projectPath, iid),
       host.getApprovals(mr.projectPath, iid),
     ]);
-    return { ready: true, mr, result, discussions, approvals };
+    return { ready: true, mr, result: cached.result, discussions, approvals, indexState: cached.indexState };
   }
 
   /** Progress of getting an MR ready; starts (or retries) the work if needed. */
   async progress(host: MergeRequestHostPort, token: string, projectPath: string, iid: number): Promise<PreparingStatus> {
     const mr = await host.getMergeRequest(projectPath, iid);
-    if (this.cache.has(keyOf(mr))) return { state: "ready", step: "Ready", percent: 100, detail: "", startedAt: Date.now() };
-    const job = this.start(mr, token);
+    const key = keyOf(mr);
+    if (this.cache.has(key) && !this.jobs.has(key)) return { state: "ready", step: "Ready", percent: 100, detail: "", startedAt: Date.now() };
+    const job = this.start(mr, token, host);
     // Report a failure once, then forget it so the next visit tries again.
     if (job.status.state === "error") this.jobs.delete(keyOf(mr));
     return { ...job.status };
   }
 
-  private start(mr: MergeRequestInfo, token: string): Job {
+  private start(mr: MergeRequestInfo, token: string, host: MergeRequestHostPort, known?: IndexLookup): Job {
     const key = keyOf(mr);
     const existing = this.jobs.get(key);
     if (existing) return existing;
 
     const status: PreparingStatus = { state: "downloading", step: "Getting the code", percent: null, detail: "", startedAt: Date.now() };
-    const promise = (async () => {
+    const promise = (async (): Promise<Cached> => {
+      let look: IndexLookup | null = known ?? null;
+      if (!look && host.findIndex) {
+        Object.assign(status, { step: "Looking for an exact index from CI", detail: "CI job gitmap-index" });
+        look = await host.findIndex(mr).catch((): IndexLookup => ({ state: "none" }));
+      }
       const gitDir = await this.repos.prepare(mr, token, (p) => {
         status.step = p.step;
         status.percent = p.percent;
@@ -116,12 +149,15 @@ export class ReviewMergeRequestUseCase {
         percent: null,
         detail: "Finding changed functions and who calls them",
       });
-      const result = await this.analyze(gitDir, mr.diffRefs.baseSha, mr.diffRefs.headSha);
-      this.cache.set(key, result);
+      if (look?.state === "found") status.detail = "Using the exact index from CI";
+      const index = look?.state === "found" ? look.data : undefined;
+      const result = await this.analyze(gitDir, mr.diffRefs.baseSha, mr.diffRefs.headSha, index);
+      const cached: Cached = { result, indexState: look ? look.state : "unsupported", checkedAt: Date.now() };
+      this.cache.set(key, cached);
       if (this.cache.size > MAX_CACHED) this.cache.delete(this.cache.keys().next().value!);
       Object.assign(status, { state: "ready", step: "Ready", percent: 100, detail: "" });
       this.jobs.delete(key);
-      return result;
+      return cached;
     })();
     promise.catch((err: unknown) => {
       status.state = "error";

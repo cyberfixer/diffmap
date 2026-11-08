@@ -32,9 +32,9 @@ const app = createApp({
     clientSecret: config.clientSecret,
     redirectUri: `${config.publicUrl}/auth/callback`,
   }),
-  hostFor: (token) => new GitLabClient(config.gitlabUrl, token),
-  review: new ReviewMergeRequestUseCase(new GitRepoCache(config.cacheDir), (gitDir, base, head) =>
-    analyzer.analyze(gitDir, base, head),
+  hostFor: (token) => new GitLabClient(config.gitlabUrl, token, fetch, { name: config.indexJob, artifact: config.indexArtifact }),
+  review: new ReviewMergeRequestUseCase(new GitRepoCache(config.cacheDir), (gitDir, base, head, index) =>
+    analyzer.analyze(gitDir, base, head, index),
   ),
   viewed: new FileViewedStore(`${config.dataDir}/viewed.json`),
   highlighters: (await loadLanguageSupport()).highlighters,

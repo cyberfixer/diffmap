@@ -22,6 +22,8 @@ export interface MrPage {
   user: Person;
   apiBase: string; // e.g. "/api/team/api/-/merge_requests/42"
   viewed: string[]; // ids of symbols this user marked as viewed
+  /** Whether CI's exact index was used: found, still building, not set up. */
+  indexState?: "found" | "pending" | "none" | "unsupported";
 }
 
 export interface RenderOptions {
@@ -428,7 +430,7 @@ export function renderHtml(
     <span class="pill mono"><span class="add">+${addedLines}</span><span class="del">−${removedLines}</span></span>
     <span class="pill">${views.length} file${views.length === 1 ? "" : "s"} · ${changed.length} symbol${changed.length === 1 ? "" : "s"}</span>
     ${warnPill}
-    ${exactPill(result)}
+    ${exactPill(result, mrPage?.indexState)}
     ${mrPage ? mrActions(mrPage) : ""}
   </div>
 </header>
@@ -519,9 +521,12 @@ function mrActions(p: MrPage): string {
 }
 
 /** Whether arrows come from a compiler (exact) or from matching names. */
-function exactPill(result: AnalysisResult): string {
+function exactPill(result: AnalysisResult, indexState?: string): string {
   const x = result.exactness;
   if (!x || x.total === 0) return "";
+  if (indexState === "pending" && x.exact < x.total) {
+    return `<span class="pill" title="The CI job gitmap-index is still running for this commit. Reload in a minute for exact calls.">Calls: by name · exact index still building</span>`;
+  }
   if (x.exact === x.total) {
     return `<span class="pill" title="Calls are resolved by a compiler (TypeScript, or an index from CI)">Calls: exact</span>`;
   }

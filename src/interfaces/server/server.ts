@@ -246,6 +246,7 @@ export function createApp(deps: AppDeps): Server {
           approvals: review.approvals,
           user: session.user,
           apiBase,
+          indexState: review.indexState,
           viewed: await deps.viewed.getViewed(session.user.username, review.mr.projectPath, iid),
         },
       });
