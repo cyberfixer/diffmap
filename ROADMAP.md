@@ -52,7 +52,11 @@ These come first because everything later builds on this output.
 
 ### 10. Other languages — DONE (tree-sitter)
 - **Status:** JavaScript, Python, Java, Go, C#, PHP, Ruby, Rust, Kotlin, Swift, Scala, C and C++ through tree-sitter (symbols, call graph by name, highlighting). TypeScript keeps the TypeScript compiler, which resolves calls exactly. Other changed text files show as plain cards.
-- **Known gap:** name matching can over-link when unrelated classes share a method name (calls with more than 5 same-named targets are skipped). Precise indexes (SCIP) built in CI could fix this per project.
+- **Known gap:** name matching can over-link when unrelated classes share a method name (calls with more than 5 same-named targets are skipped).
+
+### 11. Exact calls from CI indexes — DONE
+- **Status:** SCIP indexes (scip-typescript, scip-java incl. Kotlin, scip-clang) from a `gitmap-index` CI job or `--scip`; "implements" arrows; Angular templates linked by selector. Swift has no SCIP indexer yet.
+- **Next:** "Mark as viewed" reset when a symbol changes again; Swift via its index store if an indexer appears.
 
 ## Order
 

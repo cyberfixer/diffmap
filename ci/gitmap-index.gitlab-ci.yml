@@ -1,0 +1,73 @@
+# gitmap: exact calls from a compiler-made index (SCIP).
+#
+# Copy the jobs you need into your project's .gitlab-ci.yml. gitmap looks for a
+# successful job named "gitmap-index" in a pipeline for the merge request's head
+# commit and reads its artifact "index.scip". Without it, gitmap still works,
+# matching calls by name.
+#
+# Keep ONE job named gitmap-index. For several languages, let one job per
+# language write its own .scip file and join them in gitmap-index (bottom).
+
+stages: [gitmap]
+
+# Run on branch pushes and merge request pipelines (both use the head commit).
+.gitmap-rules: &gitmap-rules
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
+
+# ── TypeScript / JavaScript (and Angular) ─────────────────────────────────────
+# Uses your tsconfig.json. For plain JavaScript projects add --infer-tsconfig.
+# Monorepos: add --yarn-workspaces or --pnpm-workspaces.
+gitmap-index:
+  stage: gitmap
+  image: node:20
+  <<: *gitmap-rules
+  script:
+    - npm ci
+    - npx --yes @sourcegraph/scip-typescript@0.3.15 index --output index.scip
+  artifacts:
+    paths: [index.scip]
+    expire_in: 30 days
+
+# ── Java / Kotlin (Maven, Gradle or sbt) ──────────────────────────────────────
+# Rename to gitmap-index if this is your only language.
+# gitmap-index-java:
+#   stage: gitmap
+#   image: sourcegraph/scip-java:latest
+#   <<: *gitmap-rules
+#   script:
+#     - scip-java index --output java.scip
+#   artifacts:
+#     paths: [java.scip]
+#     expire_in: 30 days
+
+# ── C / C++ ───────────────────────────────────────────────────────────────────
+# scip-clang needs compile_commands.json from your build
+# (CMake: -DCMAKE_EXPORT_COMPILE_COMMANDS=ON). Use an image that can build your code.
+# gitmap-index-cpp:
+#   stage: gitmap
+#   image: your-build-image
+#   <<: *gitmap-rules
+#   script:
+#     - cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+#     - curl -sSLo scip-clang https://github.com/sourcegraph/scip-clang/releases/download/v0.3.2/scip-clang-x86_64-linux
+#     - chmod +x scip-clang
+#     - ./scip-clang --compdb-path=build/compile_commands.json --index-output-path=cpp.scip
+#   artifacts:
+#     paths: [cpp.scip]
+#     expire_in: 30 days
+
+# ── Several languages: join the files ─────────────────────────────────────────
+# SCIP files can simply be concatenated. Rename the TypeScript job above to
+# gitmap-index-ts (writing ts.scip), then:
+# gitmap-index:
+#   stage: gitmap
+#   image: alpine:3.20
+#   <<: *gitmap-rules
+#   needs: [gitmap-index-ts, gitmap-index-java]
+#   script:
+#     - cat *.scip > index.scip
+#   artifacts:
+#     paths: [index.scip]
+#     expire_in: 30 days

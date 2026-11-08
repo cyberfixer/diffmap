@@ -106,6 +106,7 @@ docker run -d --name gitmap -p 8080:8080 -v gitmap-data:/data \
 | `DATA_DIR` | Where gitmap keeps its files (default `/data`, keep it on a volume) |
 | `CACHE_DIR` | Where project code is kept (default `$DATA_DIR/repos`) |
 | `ANALYSIS_WORKERS` | How many merge requests can be analysed at the same time (default `2`) |
+| `INDEX_JOB`, `INDEX_ARTIFACT` | CI job and file with the exact index (default `gitmap-index`, `index.scip`) |
 | `NODE_EXTRA_CA_CERTS`, `GIT_SSL_CAINFO` | Path to your CA file if GitLab uses an internal certificate |
 
 Check it's running: `curl http://localhost:8080/healthz` prints `ok`.
@@ -156,6 +157,42 @@ Good to know:
   out, and GitLab tokens are never written to disk.
 - Run it behind HTTPS (a reverse proxy) in real use, and set `PUBLIC_URL` to the
   `https://` address.
+
+---
+
+## Exact calls (optional CI job)
+
+Out of the box, TypeScript calls are exact (the TypeScript compiler resolves them).
+For other languages gitmap matches calls **by name**, so two unrelated methods
+called `update()` can both get an arrow. The header of the page says which
+applies: *Calls: exact*, or *Calls: matched by name*.
+
+For exact calls in other languages, let CI build an index with the language's
+own compiler. Copy the jobs you need from
+[`ci/gitmap-index.gitlab-ci.yml`](ci/gitmap-index.gitlab-ci.yml) into your project.
+
+| Language | Indexer | Notes |
+|---|---|---|
+| TypeScript, JavaScript | [scip-typescript](https://github.com/sourcegraph/scip-typescript) | uses your `tsconfig.json`; `--infer-tsconfig` for plain JS |
+| Java, Kotlin | [scip-java](https://github.com/sourcegraph/scip-java) | Maven, Gradle or sbt |
+| C, C++ | [scip-clang](https://github.com/sourcegraph/scip-clang) | needs `compile_commands.json` |
+| Swift | none available yet | stays on name matching |
+
+- **Service:** gitmap picks up the `gitmap-index` job's `index.scip` for the MR's
+  head commit by itself. If the job is still running, the map opens with name
+  matching and switches to exact calls on a later visit.
+- **CLI:** `git-map main --scip index.scip --format html > report.html`
+  (`--scip` can be given several times).
+
+An index also tells gitmap which classes **implement** an interface; those show
+as dashed *Implemented by* arrows.
+
+### Angular
+
+Angular templates are part of the map without any setup: `<app-user-card>` in a
+template points at `UserCardComponent`, `(click)="save()"` at the component's
+`save()`, attribute directives at their class, and `| pipe` at the pipe's
+`transform()`. A changed `*.component.html` shows what it uses.
 
 ---
 
