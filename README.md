@@ -23,9 +23,12 @@ There are two ways to use it:
 | Angular templates | ✅ | components, directives, pipes and methods [linked from templates](#angular) |
 | Anything else (YAML, SQL, Markdown…) | shown as plain diff cards | — |
 
-"Matched by name" means a call to `update()` links to the functions called
-`update`. Two unrelated methods with the same name can then both get an arrow.
-The page header always says which applies: *Calls: exact* or *Calls: matched by name*.
+"Matched by name" means a call to `update()` links to a function called `update`
+that the calling code can reach: `self.update()` / `this.update()` → the same
+class; `Svc.update()` or a variable whose type is written down → that class;
+otherwise the same file, then files it imports or shares a folder with. It is
+usually right, but not compiler-exact. The page header always says which
+applies: *Calls: exact* or *Calls: matched by name*.
 
 ---
 
@@ -201,6 +204,8 @@ arrows to the exact lines. With nothing selected you see just the change.
 | red dashed | still calls code this change removes |
 
 Drag or scroll to move the map, Ctrl+scroll to zoom, Esc to clear the selection.
+The button in the top bar switches the colours between **Auto** (follows your
+system), **Light** and **Dark**; your choice is remembered in the browser.
 
 ---
 
@@ -269,7 +274,8 @@ The code is split into layers; inner layers never import outer ones.
 - **TypeScript** uses the TypeScript compiler (ts-morph), so calls are exact.
 - **Other languages** use [tree-sitter](https://tree-sitter.github.io/). Each one is a
   few lines in `src/infrastructure/parsers/tree-sitter/languages.ts` saying which
-  syntax nodes are definitions and which are calls; calls are matched by name.
+  syntax nodes are definitions and which are calls. Calls are matched by name and
+  narrowed to what the caller can reach (`tree-sitter-call-graph.ts`, `visibility.ts`).
 - **A SCIP index**, when present, replaces name matching for the files it covers
   (`src/infrastructure/scip/`). Everything it doesn't cover keeps the usual rules.
 - **Angular** is an extra graph that reads decorators and templates
