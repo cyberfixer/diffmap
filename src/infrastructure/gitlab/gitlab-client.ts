@@ -155,6 +155,8 @@ export class GitLabClient implements MergeRequestHostPort {
       // Built from the configured GitLab address (not GitLab's own idea of its URL),
       // so it works when this service reaches GitLab by an internal name.
       cloneUrl: `${this.baseUrl.replace(/\/$/, "")}/${project.path_with_namespace}.git`,
+      fetchRef: `refs/merge-requests/${mr.iid}/head`,
+      gitUser: "oauth2",
     };
   }
 

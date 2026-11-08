@@ -12,6 +12,7 @@ import { renderHtml } from "../html/render-html.js";
 import type { ServerConfig } from "./config.js";
 import { errorPage, homePage, loadingPage, signInPage } from "./pages.js";
 import { SessionStore, type Session } from "./sessions.js";
+import type { HostProfile } from "./host-profile.js";
 import { redactSecrets, sensitiveValues } from "./safe-log.js";
 
 export interface OAuthPort {
@@ -22,7 +23,7 @@ export interface OAuthPort {
 
 export interface AppDeps {
   config: ServerConfig;
-  /** GitLab application sign-in; absent in view mode (personal tokens instead). */
+  /** Sign-in through the host's OAuth application; absent in view mode (personal tokens instead). */
   oauth?: OAuthPort;
   /** A code-host client acting with the given (refreshing) token. */
   hostFor: (token: () => Promise<string>) => MergeRequestHostPort;
@@ -35,7 +36,6 @@ export interface AppDeps {
 }
 
 const COOKIE = "diffmap_session";
-const MR_PAGE = /^\/(.+?)\/-\/merge_requests\/(\d+)\/?$/;
 const MR_API = /^\/api\/(.+?)\/-\/merge_requests\/(\d+)\/(discussions|approve|unapprove|viewed|status|discussions\/([^/]+)\/notes)$/;
 const MAX_BODY = 64 * 1024;
 
@@ -51,16 +51,15 @@ const encodePath = (p: string): string => p.split("/").map(encodeURIComponent).j
 /** Only same-site paths may be used as a place to return to after sign-in. */
 const safeReturn = (p: string | null): string => (p && p.startsWith("/") && !p.startsWith("//") ? p : "/");
 
-/** Find "<project path>/-/merge_requests/<iid>" in a pasted link or path. */
-export function parseMergeRequestLink(input: string): { projectPath: string; iid: number } | null {
+/** Find the project and number of a review in a pasted link or path (e.g. ".../-/merge_requests/42", ".../pull/42"). */
+export function parseReviewLink(input: string, host: HostProfile): { projectPath: string; number: number } | null {
   let path = input.trim();
   try {
     path = new URL(path).pathname;
   } catch {
     /* not a full URL: treat it as a path */
   }
-  const m = path.replace(/^\/?/, "/").match(/^\/(.+?)\/-\/merge_requests\/(\d+)/);
-  return m ? { projectPath: decodePath(m[1]), iid: Number(m[2]) } : null;
+  return host.parsePath(path.replace(/^\/?/, "/"));
 }
 
 function cookies(req: IncomingMessage): Record<string, string> {
@@ -125,9 +124,10 @@ function readPosition(v: unknown): LinePosition | undefined {
   return { path: p.path, oldLine, newLine };
 }
 
-/** The diffmap web service: GitLab sign-in, merge request maps, comments and approvals. */
+/** The diffmap web service: sign-in with the code host, review maps, comments and approvals. */
 export function createApp(deps: AppDeps): Server {
   const { config } = deps;
+  const host = config.host;
   const sessions = deps.sessions ?? new SessionStore();
   // Every log line goes through redactSecrets: no query string or sign-in code is ever written.
   const write = deps.log ?? ((m: string) => console.log(m));
@@ -185,7 +185,7 @@ export function createApp(deps: AppDeps): Server {
 
     // ── view mode: sign in with your own personal access token ──
     if (viewOnly && method === "GET" && (path === "/auth/login" || path === "/auth/callback")) {
-      return send(res, 200, signInPage(config.gitlabUrl, safeReturn(url.searchParams.get("returnTo")), "view"));
+      return send(res, 200, signInPage(host, safeReturn(url.searchParams.get("returnTo")), "view"));
     }
     if (viewOnly && method === "POST" && path === "/auth/token") {
       const origin = req.headers.origin;
@@ -193,19 +193,19 @@ export function createApp(deps: AppDeps): Server {
       const form = await readForm(req);
       const returnTo = safeReturn(form.get("returnTo"));
       const token = (form.get("token") ?? "").trim();
-      const retry = (msg: string) => send(res, 400, signInPage(config.gitlabUrl, returnTo, "view", msg));
-      if (!/^[\w.-]{10,200}$/.test(token)) return retry("That doesn't look like a GitLab access token.");
-      const host = deps.hostFor(async () => token);
+      const retry = (msg: string) => send(res, 400, signInPage(host, returnTo, "view", msg));
+      if (!/^[\w.-]{10,200}$/.test(token)) return retry(`That doesn't look like a ${host.name} access token.`);
+      const client = deps.hostFor(async () => token);
       let user;
       try {
-        user = await host.currentUser();
+        user = await client.currentUser();
       } catch (err) {
         if (err instanceof HostError && (err.status === 401 || err.status === 403)) {
-          return retry("GitLab did not accept this token. Check that it is not expired or revoked.");
+          return retry(`${host.name} did not accept this token. Check that it is not expired or revoked.`);
         }
         throw err;
       }
-      const scopes = await host.tokenScopes?.();
+      const scopes = await client.tokenScopes?.();
       const missing = scopes ? missingScopes(scopes) : [];
       if (missing.length) return retry(`This token is missing the scope${missing.length > 1 ? "s" : ""} ${missing.join(" and ")}.`);
       // Kept in memory only, like OAuth tokens; never refreshed (it is the user's own token).
@@ -214,7 +214,7 @@ export function createApp(deps: AppDeps): Server {
       return redirect(res, returnTo, { "Set-Cookie": cookie(s.id, 7 * 24 * 3600) });
     }
 
-    // ── sign-in with GitLab ──
+    // ── sign-in through the host's OAuth application ──
     if (method === "GET" && path === "/auth/login" && deps.oauth) {
       const { verifier, challenge } = pkcePair();
       const state = sessions.startLogin(verifier, safeReturn(url.searchParams.get("returnTo")));
@@ -222,7 +222,7 @@ export function createApp(deps: AppDeps): Server {
     }
     if (method === "GET" && path === "/auth/callback" && deps.oauth) {
       if (url.searchParams.get("error")) {
-        return send(res, 403, errorPage("Sign-in cancelled", url.searchParams.get("error_description") ?? "GitLab did not sign you in."));
+        return send(res, 403, errorPage("Sign-in cancelled", url.searchParams.get("error_description") ?? `${host.name} did not sign you in.`));
       }
       const pending = sessions.finishLogin(url.searchParams.get("state") ?? "");
       const code = url.searchParams.get("code");
@@ -240,13 +240,13 @@ export function createApp(deps: AppDeps): Server {
 
     // ── pages ──
     if (method === "GET" && path === "/") {
-      return send(res, 200, session ? homePage(session.user, config.gitlabUrl) : signInPage(config.gitlabUrl, "/", viewOnly ? "view" : "full"));
+      return send(res, 200, session ? homePage(session.user, host) : signInPage(host, "/", viewOnly ? "view" : "full"));
     }
     if (method === "GET" && path === "/go") {
       if (!session) return redirect(res, loginUrl(path + url.search));
-      const link = parseMergeRequestLink(url.searchParams.get("url") ?? "");
-      if (!link) return send(res, 400, homePage(session.user, config.gitlabUrl, "That doesn't look like a merge request link."));
-      return redirect(res, `/${encodePath(link.projectPath)}/-/merge_requests/${link.iid}`);
+      const link = parseReviewLink(url.searchParams.get("url") ?? "", host);
+      if (!link) return send(res, 400, homePage(session.user, host, `That doesn't look like a ${host.reviewName} link.`));
+      return redirect(res, host.pathFor(link.projectPath, link.number));
     }
 
     const api = path.match(MR_API);
@@ -280,27 +280,29 @@ export function createApp(deps: AppDeps): Server {
       }
       const position = readPosition(body.position);
       const code = typeof body.code === "string" ? body.code.slice(0, 2000) : undefined;
-      // Lines from files outside the diff can never carry a GitLab diff comment.
+      // Lines from files outside the diff can never carry a diff comment on the host.
       const general = body.outside === true;
       return json(res, 201, await deps.review.comment(host, projectPath, iid, { body: text, position, code, general }));
     }
 
-    const page = path.match(MR_PAGE);
-    if (page && method === "GET") {
+    const page = method === "GET" && !path.startsWith("/api/") ? host.parsePath(path) : null;
+    if (page) {
       if (!session) return redirect(res, loginUrl(path));
-      const projectPath = decodePath(page[1]);
-      const iid = Number(page[2]);
+      const projectPath = page.projectPath;
+      const iid = page.number;
       const token = tokenFor(session);
       const review = await deps.review.open(deps.hostFor(token), await token(), projectPath, iid);
       const apiBase = `/api/${encodePath(review.mr.projectPath)}/-/merge_requests/${iid}`;
       if (!review.ready) {
         // Show the download/analysis progress; the page reloads itself when ready.
-        return send(res, 200, loadingPage(`!${iid} · ${review.mr.title}`, `${apiBase}/status`, review.status));
+        return send(res, 200, loadingPage(`${host.refPrefix}${iid} · ${review.mr.title}`, `${apiBase}/status`, review.status));
       }
       log(`map: ${review.mr.projectPath}!${iid} for @${session.user.username}`);
       const html = renderHtml(review.result, deps.highlighters ?? [], {
         mr: {
           readOnly: viewOnly,
+          hostName: host.name,
+          refPrefix: host.refPrefix,
           mr: review.mr,
           discussions: review.discussions,
           approvals: review.approvals,
@@ -328,10 +330,10 @@ export function createApp(deps: AppDeps): Server {
         status = err.status === 401 ? 401 : err.status === 403 || err.status === 404 ? 404 : 502;
         message =
           status === 401
-            ? "Your GitLab sign-in is no longer valid."
+            ? `Your ${host.name} sign-in is no longer valid.`
             : status === 404
-              ? "That merge request doesn't exist, or your GitLab account can't see it."
-              : "GitLab returned an error.";
+              ? `That ${host.reviewName} doesn't exist, or your ${host.name} account can't see it.`
+              : `${host.name} returned an error.`;
       }
       if (status >= 500) {
         const path = (req.url ?? "/").split("?")[0];

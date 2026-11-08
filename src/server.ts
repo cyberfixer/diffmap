@@ -1,7 +1,7 @@
 import { ReviewMergeRequestUseCase } from "./application/use-cases/review-merge-request.js";
 import { GitLabClient } from "./infrastructure/gitlab/gitlab-client.js";
 import { GitLabOAuth } from "./infrastructure/gitlab/gitlab-oauth.js";
-import { GitRepoCache } from "./infrastructure/gitlab/git-repo-cache.js";
+import { GitRepoCache } from "./infrastructure/git/git-repo-cache.js";
 import { loadLanguageSupport } from "./infrastructure/language-support.js";
 import { FileViewedStore } from "./infrastructure/storage/file-viewed-store.js";
 import { WorkerAnalyzer } from "./infrastructure/worker/worker-analyzer.js";
@@ -31,13 +31,13 @@ const app = createApp({
   oauth:
     config.mode === "full"
       ? new GitLabOAuth({
-          gitlabUrl: config.gitlabUrl,
+          gitlabUrl: config.hostUrl,
           clientId: config.clientId,
           clientSecret: config.clientSecret,
           redirectUri: `${config.publicUrl}/auth/callback`,
         })
       : undefined,
-  hostFor: (token) => new GitLabClient(config.gitlabUrl, token, fetch, { name: config.indexJob, artifact: config.indexArtifact }),
+  hostFor: (token) => new GitLabClient(config.hostUrl, token, fetch, { name: config.indexJob, artifact: config.indexArtifact }),
   review: new ReviewMergeRequestUseCase(new GitRepoCache(config.cacheDir), (gitDir, base, head, index) =>
     analyzer.analyze(gitDir, base, head, index),
   ),
@@ -47,5 +47,5 @@ const app = createApp({
 
 app.listen(config.port, () => {
   const mode = config.mode === "full" ? "full (GitLab sign-in, comments, approvals)" : "view-only (personal access tokens)";
-  console.log(`diffmap service on port ${config.port}, ${mode}, GitLab ${config.gitlabUrl}, public at ${config.publicUrl}`);
+  console.log(`diffmap service on port ${config.port}, ${mode}, GitLab ${config.hostUrl}, public at ${config.publicUrl}`);
 });

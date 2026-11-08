@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
-import { createApp, parseMergeRequestLink } from "../src/interfaces/server/server.js";
+import { createApp, parseReviewLink } from "../src/interfaces/server/server.js";
+import { configFromEnv } from "../src/interfaces/server/config.js";
+import { githubProfile, gitlabProfile } from "../src/interfaces/server/host-profile.js";
 import { ReviewMergeRequestUseCase } from "../src/application/use-cases/review-merge-request.js";
 import { AnalyzeRangeUseCase } from "../src/application/use-cases/analyze-range.js";
 import { GitDiffReader } from "../src/infrastructure/git/git-diff-reader.js";
@@ -72,7 +74,7 @@ beforeAll(async () => {
   };
 
   server = createApp({
-    config: { mode: "full", gitlabUrl: "https://gitlab.test", clientId: "c", clientSecret: "s", publicUrl: "http://map.test", port: 0, cacheDir: "" },
+    config: configFromEnv({ GITLAB_URL: "https://gitlab.test", GITLAB_CLIENT_ID: "c", GITLAB_CLIENT_SECRET: "s", PUBLIC_URL: "http://map.test" }),
     oauth: {
       authorizeUrl: (state) => `https://gitlab.test/oauth/authorize?state=${state}`,
       exchange: async (code) => {
@@ -226,8 +228,12 @@ describe("diffmap service", () => {
     const cookie = await signIn();
     const r = await get("/go?url=" + encodeURIComponent("https://gitlab.test/team/api/-/merge_requests/42/diffs#abc"), cookie);
     expect(r.headers.get("location")).toBe("/team/api/-/merge_requests/42");
-    expect(parseMergeRequestLink("group/sub/proj/-/merge_requests/7")).toEqual({ projectPath: "group/sub/proj", iid: 7 });
-    expect(parseMergeRequestLink("https://gitlab.test/team/api")).toBeNull();
+    const gl = gitlabProfile("https://gitlab.test");
+    expect(parseReviewLink("group/sub/proj/-/merge_requests/7", gl)).toEqual({ projectPath: "group/sub/proj", number: 7 });
+    expect(parseReviewLink("https://gitlab.test/team/api", gl)).toBeNull();
+    const gh = githubProfile("https://github.com");
+    expect(parseReviewLink("https://github.com/acme/api/pull/42/files", gh)).toEqual({ projectPath: "acme/api", number: 42 });
+    expect(gh.pathFor("acme/api", 42)).toBe("/acme/api/pull/42");
   });
 
   it("remembers what each user marked as viewed", async () => {

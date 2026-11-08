@@ -1,6 +1,7 @@
 import type { Person } from "../../application/ports/merge-request.port.js";
 import type { PreparingStatus } from "../../application/use-cases/review-merge-request.js";
 import { THEME_BOOT, THEME_BUTTON } from "../html/theme.js";
+import type { HostProfile } from "./host-profile.js";
 
 const esc = (s: string): string =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -53,43 +54,42 @@ function shell(title: string, body: string): string {
 </html>`;
 }
 
-export function signInPage(gitlabUrl: string, returnTo: string, mode: "full" | "view" = "full", error = ""): string {
+export function signInPage(host: HostProfile, returnTo: string, mode: "full" | "view" = "full", error = ""): string {
   if (mode === "full") {
     return shell(
       "Sign in · diffmap",
-      `<h1>Review merge requests as a map</h1>
-<p>Sign in with your GitLab account at <code>${esc(gitlabUrl)}</code>. diffmap only sees what you can see in GitLab.</p>
-<a class="btn" href="/auth/login?returnTo=${encodeURIComponent(returnTo)}">Sign in with GitLab</a>`
+      `<h1>Review ${host.reviewName}s as a map</h1>
+<p>Sign in with your ${host.name} account at <code>${esc(host.url)}</code>. diffmap only sees what you can see in ${host.name}.</p>
+<a class="btn" href="/auth/login?returnTo=${encodeURIComponent(returnTo)}">Sign in with ${host.name}</a>`
     );
   }
-  // View mode: no GitLab application; each person uses their own read-only token.
-  const create = `${gitlabUrl}/-/user_settings/personal_access_tokens?name=diffmap&scopes=read_api,read_repository`;
+  // View mode: no OAuth application; each person uses their own read-only token.
   return shell(
     "Sign in · diffmap",
-    `<h1>Review merge requests as a map</h1>
-<p>This diffmap is <b>view-only</b>. Sign in with a GitLab access token of your own; diffmap only sees what you can see in GitLab.</p>
+    `<h1>Review ${host.reviewName}s as a map</h1>
+<p>This diffmap is <b>view-only</b>. Sign in with a ${host.name} access token of your own; diffmap only sees what you can see in ${host.name}.</p>
 <ol style="margin:0 0 16px; padding-left:20px; color:var(--muted)">
-  <li><a href="${esc(create)}" target="_blank" rel="noopener">Create a token in GitLab</a> (opens with the right settings: scopes <code>read_api</code> and <code>read_repository</code>).</li>
+  <li><a href="${esc(host.token.createUrl)}" target="_blank" rel="noopener">Create a token in ${host.name}</a> (${esc(host.token.howTo)}).</li>
   <li>Paste it here. It stays in diffmap's memory only and is forgotten when you sign out.</li>
 </ol>
 <form method="post" action="/auth/token">
   <input type="hidden" name="returnTo" value="${esc(returnTo)}">
-  <label for="t">GitLab access token</label>
-  <input id="t" name="token" type="password" required autocomplete="off" spellcheck="false" placeholder="glpat-…" autofocus>
+  <label for="t">${host.name} access token</label>
+  <input id="t" name="token" type="password" required autocomplete="off" spellcheck="false" autofocus>
   ${error ? `<p class="err" style="margin:10px 0 0">${esc(error)}</p>` : ""}
   <button class="btn" type="submit">Sign in</button>
 </form>`
   );
 }
 
-export function homePage(user: Person, gitlabUrl: string, error = ""): string {
+export function homePage(user: Person, host: HostProfile, error = ""): string {
   return shell(
     "diffmap",
-    `<h1>Open a merge request</h1>
-<p>Paste a merge request link from GitLab. Tip: you can also replace <code>${esc(gitlabUrl.replace(/^https?:\/\//, ""))}</code> with this site's address in any merge request URL.</p>
+    `<h1>Open a ${host.reviewName}</h1>
+<p>Paste a ${host.reviewName} link from ${host.name}. Tip: you can also replace <code>${esc(host.url.replace(/^https?:\/\//, ""))}</code> with this site's address in any ${host.reviewName} URL.</p>
 <form method="get" action="/go">
-  <label for="u">Merge request link</label>
-  <input id="u" name="url" required placeholder="${esc(gitlabUrl)}/group/project/-/merge_requests/42" autofocus>
+  <label for="u">${host.name} ${host.reviewName} link</label>
+  <input id="u" name="url" required placeholder="${esc(host.example)}" autofocus>
   ${error ? `<p class="err" style="margin:10px 0 0">${esc(error)}</p>` : ""}
   <button class="btn" type="submit">Open map</button>
 </form>
@@ -125,7 +125,7 @@ export function loadingPage(title: string, statusUrl: string, status: PreparingS
   #err { display:none; }
 </style>
 <h1>${esc(title)}</h1>
-<p>Getting this merge request ready. Big projects take longer the first time; after that only new commits are fetched.</p>
+<p>Getting this review ready. Big projects take longer the first time; after that only new commits are fetched.</p>
 <ol class="steps">
   <li id="s1">Download the code</li>
   <li id="s2">Analyse the changes</li>

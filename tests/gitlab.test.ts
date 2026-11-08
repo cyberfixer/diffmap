@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { GitLabClient } from "../src/infrastructure/gitlab/gitlab-client.js";
 import { GitLabOAuth, pkcePair } from "../src/infrastructure/gitlab/gitlab-oauth.js";
-import { GitRepoCache, parseGitProgress } from "../src/infrastructure/gitlab/git-repo-cache.js";
+import { GitRepoCache, parseGitProgress } from "../src/infrastructure/git/git-repo-cache.js";
 import { ReviewMergeRequestUseCase, quoteLine } from "../src/application/use-cases/review-merge-request.js";
 import {
   PositionRejectedError,
@@ -234,6 +234,7 @@ describe("GitRepoCache", () => {
       projectPath: "team/api", iid: 5, title: "t", webUrl: "", state: "opened",
       author: { name: "a", username: "a" }, sourceBranch: "feature", targetBranch: "main",
       diffRefs: { baseSha: base, headSha: head, startSha: base }, cloneUrl: remote.dir,
+      fetchRef: "refs/merge-requests/5/head", gitUser: "oauth2",
     };
     const cache = new GitRepoCache(cacheDir);
     const steps: string[] = [];

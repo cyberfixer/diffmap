@@ -1,8 +1,8 @@
 /**
- * Browser script added only when the page shows a GitLab merge request:
+ * Browser script added only when the page shows a merge/pull request from the service:
  * shows existing comment threads on their lines, lets the reviewer comment on
  * any line (click its line number) or reply, and approve. Talks to the diffmap
- * server, which calls GitLab as the signed-in user.
+ * server, which calls the code host (GitLab or GitHub) as the signed-in user.
  * Kept free of template-literal syntax so it can live in a TS string.
  */
 export const MR_CLIENT_SCRIPT = `
@@ -93,7 +93,7 @@ export const MR_CLIENT_SCRIPT = `
     t.dataset.id = d.id;
     if (d.resolved) t.title = 'Resolved';
     d.notes.forEach(function (n) { t.appendChild(noteEl(n)); });
-    if (M.readOnly) return t; // view mode: read the thread, answer in GitLab
+    if (M.readOnly) return t; // view mode: read the thread, answer on the host
     var rb = h('button', 'link', 'Reply');
     rb.type = 'button';
     rb.addEventListener('click', function () {
@@ -209,7 +209,7 @@ export const MR_CLIENT_SCRIPT = `
         c.replaceWith(threadEl(r.discussion));
         row.classList.add('has-c');
         bump();
-        if (r.fallback && !info.outside) toast("GitLab can't attach a comment to this line, so it was posted as a general comment that quotes it.");
+        if (r.fallback && !info.outside) toast(M.hostName + " can't attach a comment to this line, so it was posted as a general comment that quotes it.");
         G.relayout();
       },
       cancel: function () { c.remove(); G.relayout(); }

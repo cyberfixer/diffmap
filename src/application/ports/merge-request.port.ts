@@ -1,5 +1,5 @@
 /**
- * What diffmap needs from a code host (GitLab today) to review a merge request:
+ * What diffmap needs from a code host (GitLab or GitHub) to review a merge request:
  * its details, its comment threads, and approvals. Language- and host-neutral.
  */
 
@@ -19,6 +19,10 @@ export interface MergeRequestInfo {
   targetBranch: string;
   diffRefs: { baseSha: string; headSha: string; startSha: string };
   cloneUrl: string; // HTTP(S) git URL of the project
+  /** Git ref holding the review's head commit, e.g. refs/merge-requests/42/head or refs/pull/42/head. */
+  fetchRef: string;
+  /** User name git sends with the token (GitLab: oauth2, GitHub: x-access-token). */
+  gitUser: string;
 }
 
 /** Where a comment sits in the diff. Exactly one of the lines may be null. */

@@ -15,8 +15,10 @@ import type {
   ReviewDiscussion,
 } from "../../application/ports/merge-request.port.js";
 
-/** Extra data when the page shows a GitLab merge request (service mode). */
+/** Extra data when the page shows a merge/pull request from the service. */
 export interface MrPage {
+  hostName?: string; // "GitLab" or "GitHub" (default GitLab)
+  refPrefix?: string; // "!" or "#" (default "!")
   /** View mode: show comments and approvals, but no way to add or change them. */
   readOnly?: boolean;
   mr: MergeRequestInfo;
@@ -377,7 +379,7 @@ export function renderHtml(
   const range = result.range;
   const commits = range ? ` · ${range.commits} commit${range.commits === 1 ? "" : "s"}` : "";
   const title = mrPage
-    ? `!${mrPage.mr.iid} · ${mrPage.mr.title}`
+    ? `${mrPage.refPrefix ?? "!"}${mrPage.mr.iid} · ${mrPage.mr.title}`
     : range?.title ?? (range ? `${range.headName} → ${range.baseName}` : "Code changes");
   const sub = mrPage
     ? `${mrPage.mr.author.name} · ${mrPage.mr.sourceBranch} → ${mrPage.mr.targetBranch}${commits}`
@@ -411,6 +413,7 @@ export function renderHtml(
           discussions: mrPage.discussions,
           viewed: mrPage.viewed,
           readOnly: !!mrPage.readOnly,
+          hostName: mrPage.hostName ?? "GitLab",
         }
       : null,
   };
@@ -431,7 +434,7 @@ export function renderHtml(
 <body class="show-out${mrPage ? " mr" : ""}${mrPage && !mrPage.readOnly ? " mr-write" : ""}">
 <header class="top">
   <div class="brand"><svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2.5"></circle><circle cx="19" cy="6" r="2.5"></circle><circle cx="12" cy="18" r="2.5"></circle><path d="M7.5 6h9M6.5 8.2l4.2 7.6M17.5 8.2l-4.2 7.6"></path></svg><span>diffmap</span></div>
-  <div class="title"><div class="t">${mrPage ? `<a href="${esc(mrPage.mr.webUrl)}" title="Open in GitLab">${esc(title)}</a>` : esc(title)}</div><div class="s mono">${esc(sub)}</div></div>
+  <div class="title"><div class="t">${mrPage ? `<a href="${esc(mrPage.mr.webUrl)}" title="Open in ${esc(mrPage.hostName ?? "GitLab")}">${esc(title)}</a>` : esc(title)}</div><div class="s mono">${esc(sub)}</div></div>
   <div class="pills">
     <span class="pill mono"><span class="add">+${addedLines}</span><span class="del">−${removedLines}</span></span>
     <span class="pill">${views.length} file${views.length === 1 ? "" : "s"} · ${changed.length} symbol${changed.length === 1 ? "" : "s"}</span>
@@ -512,7 +515,7 @@ export function renderHtml(
 `;
 }
 
-/** Approve button, link back to GitLab and the signed-in user (service mode). */
+/** Approve button, link back to the host and the signed-in user (service mode). */
 function mrActions(p: MrPage): string {
   const a = p.approvals;
   const approvedNote = a.approvedBy.length
@@ -522,8 +525,8 @@ function mrActions(p: MrPage): string {
   const disabled = !a.userHasApproved && !a.userCanApprove ? " disabled title=\"You can't approve this merge request\"" : "";
   return `${approvedNote}
     <span class="pill" id="ccount">${p.discussions.length} comment${p.discussions.length === 1 ? "" : "s"}</span>
-    <a class="hbtn" href="${esc(p.mr.webUrl)}">Open in GitLab</a>
-    ${p.readOnly ? `<span class="pill" title="This diffmap is view-only: comment and approve in GitLab">View only</span>` : `<button class="hbtn ${a.userHasApproved ? "" : "primary"}" id="approve" type="button" aria-pressed="${a.userHasApproved}"${disabled}>${label}</button>`}
+    <a class="hbtn" href="${esc(p.mr.webUrl)}">Open in ${esc(p.hostName ?? "GitLab")}</a>
+    ${p.readOnly ? `<span class="pill" title="This diffmap is view-only: comment and approve in ${esc(p.hostName ?? "GitLab")}">View only</span>` : `<button class="hbtn ${a.userHasApproved ? "" : "primary"}" id="approve" type="button" aria-pressed="${a.userHasApproved}"${disabled}>${label}</button>`}
     <form method="post" action="/auth/logout" class="who"><span title="Signed in as @${esc(p.user.username)}">${esc(p.user.name)}</span><button type="submit" class="link">Sign out</button></form>`;
 }
 

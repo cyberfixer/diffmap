@@ -4,8 +4,9 @@ import { join } from "node:path";
 import type { MergeRequestInfo, Progress, RepoCachePort } from "../../application/ports/merge-request.port.js";
 
 /**
- * One bare git repository per project under `root`. Each MR fetches only what
- * it is missing (the target branch and GitLab's refs/merge-requests/<iid>/head),
+ * One bare git repository per project under `root`. Each review fetches only what
+ * it is missing (the target branch and the host's review ref, e.g.
+ * refs/merge-requests/<iid>/head on GitLab or refs/pull/<n>/head on GitHub),
  * authenticated with the signed-in user's token, which is never stored on disk.
  */
 export class GitRepoCache implements RepoCachePort {
@@ -28,8 +29,8 @@ export class GitRepoCache implements RepoCachePort {
       const missing = () => shas.filter((s) => !hasCommit(gitDir, s));
       if (missing().length === 0) return gitDir;
 
-      const auth = ["-c", `http.extraHeader=Authorization: Basic ${Buffer.from(`oauth2:${token}`).toString("base64")}`];
-      onProgress({ step, percent: null, detail: "Connecting to GitLab" });
+      const auth = ["-c", `http.extraHeader=Authorization: Basic ${Buffer.from(`${mr.gitUser}:${token}`).toString("base64")}`];
+      onProgress({ step, percent: null, detail: "Connecting to the code host" });
       const report = (line: string) => {
         const p = parseGitProgress(line);
         if (p) onProgress({ step, ...p });
@@ -39,7 +40,7 @@ export class GitRepoCache implements RepoCachePort {
           ...auth,
           "fetch", "--progress", "--no-tags", mr.cloneUrl,
           `+refs/heads/${mr.targetBranch}:refs/heads/${mr.targetBranch}`,
-          `+refs/merge-requests/${mr.iid}/head:refs/merge-requests/${mr.iid}/head`,
+          `+${mr.fetchRef}:${mr.fetchRef}`,
         ],
         gitDir,
         report,
