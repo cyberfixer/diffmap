@@ -261,4 +261,4 @@ and to the grammar list in the `Dockerfile`, plus a test in `tests/tree-sitter.t
 
 ## License
 
-[MIT](LICENSE) © 2026 abduallah
+[MIT](LICENSE) © 2026 A.Aloleqi
