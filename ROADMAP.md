@@ -44,8 +44,8 @@
 
 ## Before the first push to GitHub
 
-- **License:** no license file yet; without one others can't reuse the code. Choose one (e.g. MIT, Apache-2.0).
-- **Commit author:** commits are signed `wefc <wefc@localhost>`, which GitHub won't link to an account. Rewrite to the real GitHub email before pushing, if wanted (changes history).
+- **License:** DONE (MIT).
+- **Commit author:** kept as `wefc <wefc@localhost>` (decided).
 - **Build error:** a `npm run build` error was reported but couldn't be reproduced; needs the error text.
 
 ## Needs a real test
@@ -99,4 +99,4 @@
 
 ## Suggested order
 
-Before pushing: license and author. Then the real tests above. Then 15 → 4 → 3 → 16 → 17, which make day-to-day reviews more accurate. 18, 19, 7, 9 and 20 after that, in any order.
+Then the real tests above. Then 15 → 4 → 3 → 16 → 17, which make day-to-day reviews more accurate. 18, 19, 7, 9 and 20 after that, in any order.

@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "See which functions a code change touches and where they are used, as a map. CLI and GitLab merge request service.",
   "private": true,
+  "license": "MIT",
   "keywords": [
     "code-review",
     "git",

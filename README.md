@@ -256,3 +256,9 @@ The code is split into layers; inner layers never import outer ones.
 
 To add a language tree-sitter has a grammar for, add an entry to `languages.ts`
 and to the grammar list in the `Dockerfile`, plus a test in `tests/tree-sitter.test.ts`.
+
+---
+
+## License
+
+[MIT](LICENSE) © 2026 abduallah
