@@ -1,0 +1,262 @@
+import { describe, it, expect, afterEach } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { GitLabClient } from "../src/infrastructure/gitlab/gitlab-client.js";
+import { GitLabOAuth, pkcePair } from "../src/infrastructure/gitlab/gitlab-oauth.js";
+import { GitRepoCache } from "../src/infrastructure/gitlab/git-repo-cache.js";
+import { ReviewMergeRequestUseCase, quoteLine } from "../src/application/use-cases/review-merge-request.js";
+import {
+  PositionRejectedError,
+  type MergeRequestHostPort,
+  type MergeRequestInfo,
+} from "../src/application/ports/merge-request.port.js";
+import { createFixtureRepo, type FixtureRepo } from "./fixtures/repo.js";
+
+interface Call { method: string; url: string; headers: Record<string, string>; body: string | null }
+
+/** A fetch that records requests and answers from a route table. */
+function fakeFetch(routes: Record<string, (body: unknown) => [number, unknown]>) {
+  const calls: Call[] = [];
+  const impl = (async (input: string | URL, init: RequestInit = {}) => {
+    const url = String(input);
+    const method = init.method ?? "GET";
+    const body = init.body ? String(init.body) : null;
+    calls.push({ method, url, headers: init.headers as Record<string, string>, body });
+    const path = url.replace(/^https:\/\/gitlab\.test/, "");
+    const route = routes[`${method} ${path}`];
+    const [status, data] = route ? route(body && body.startsWith("{") ? JSON.parse(body) : body) : [404, { message: "404" }];
+    return new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+  return { impl, calls };
+}
+
+const MR_JSON = {
+  iid: 42,
+  title: "Shorter token lifetime",
+  web_url: "https://gitlab.test/team/api/-/merge_requests/42",
+  state: "opened",
+  author: { name: "Sara K", username: "sara" },
+  source_branch: "feature/tokens",
+  target_branch: "main",
+  project_id: 7,
+  diff_refs: { base_sha: "b".repeat(40), head_sha: "h".repeat(40), start_sha: "s".repeat(40) },
+};
+const PROJECT_JSON = { http_url_to_repo: "https://gitlab.test/team/api.git", path_with_namespace: "team/api" };
+const MR_PATH = "/api/v4/projects/team%2Fapi/merge_requests/42";
+
+const mrRoutes = {
+  [`GET ${MR_PATH}`]: () => [200, MR_JSON] as [number, unknown],
+  "GET /api/v4/projects/7": () => [200, PROJECT_JSON] as [number, unknown],
+};
+
+describe("GitLabClient", () => {
+  it("reads a merge request as the signed-in user", async () => {
+    const f = fakeFetch(mrRoutes);
+    const mr = await new GitLabClient("https://gitlab.test/", async () => "tok", f.impl).getMergeRequest("team/api", 42);
+
+    expect(mr).toMatchObject({
+      projectPath: "team/api",
+      iid: 42,
+      title: "Shorter token lifetime",
+      author: { name: "Sara K", username: "sara" },
+      sourceBranch: "feature/tokens",
+      targetBranch: "main",
+      cloneUrl: "https://gitlab.test/team/api.git",
+    });
+    expect(mr.diffRefs.headSha).toBe("h".repeat(40));
+    expect(f.calls[0].headers.Authorization).toBe("Bearer tok");
+  });
+
+  it("keeps line positions and drops system notes from discussions", async () => {
+    const f = fakeFetch({
+      [`GET ${MR_PATH}/discussions?per_page=100&page=1`]: () => [
+        200,
+        [
+          { id: "d1", notes: [{ id: 1, body: "added 1 commit", system: true, author: { name: "x", username: "x" }, created_at: "t" }] },
+          {
+            id: "d2",
+            notes: [
+              {
+                id: 2, body: "Why 900?", system: false, resolvable: true, resolved: false,
+                author: { name: "Ali", username: "ali" }, created_at: "2026-11-01T10:00:00Z",
+                position: { new_path: "src/config.ts", old_path: "src/config.ts", new_line: 2, old_line: null },
+              },
+            ],
+          },
+          { id: "d3", notes: [{ id: 3, body: "LGTM", system: false, author: { name: "Ali", username: "ali" }, created_at: "t" }] },
+        ],
+      ],
+    });
+    const ds = await new GitLabClient("https://gitlab.test", async () => "t", f.impl).listDiscussions("team/api", 42);
+
+    expect(ds.map((d) => d.id)).toEqual(["d2", "d3"]);
+    expect(ds[0].position).toEqual({ path: "src/config.ts", oldLine: null, newLine: 2 });
+    expect(ds[0].resolved).toBe(false);
+    expect(ds[1].position).toBeNull();
+  });
+
+  it("posts a line comment with the MR's diff refs, and reports a refused line", async () => {
+    const posted: unknown[] = [];
+    const f = fakeFetch({
+      ...mrRoutes,
+      [`POST ${MR_PATH}/discussions`]: (body) => {
+        posted.push(body);
+        const b = body as { position?: { new_line?: number } };
+        if (b.position?.new_line === 999) return [400, { message: "line_code can't be blank" }];
+        return [201, { id: "d9", notes: [{ id: 9, body: "hi", system: false, author: { name: "Me", username: "me" }, created_at: "t" }] }];
+      },
+    });
+    const client = new GitLabClient("https://gitlab.test", async () => "t", f.impl);
+    const mr = await client.getMergeRequest("team/api", 42);
+
+    const d = await client.createDiscussion(mr, { body: "hi", position: { path: "a.ts", oldLine: 3, newLine: 4 } });
+    expect(d.id).toBe("d9");
+    expect(posted[0]).toEqual({
+      body: "hi",
+      position: {
+        position_type: "text",
+        base_sha: "b".repeat(40),
+        start_sha: "s".repeat(40),
+        head_sha: "h".repeat(40),
+        old_path: "a.ts",
+        new_path: "a.ts",
+        old_line: 3,
+        new_line: 4,
+      },
+    });
+
+    await expect(
+      client.createDiscussion(mr, { body: "x", position: { path: "a.ts", oldLine: null, newLine: 999 } })
+    ).rejects.toBeInstanceOf(PositionRejectedError);
+  });
+
+  it("approves at the head commit", async () => {
+    const approvals = { user_has_approved: true, user_can_approve: true, approved_by: [{ user: { name: "Me", username: "me" } }] };
+    const f = fakeFetch({
+      ...mrRoutes,
+      [`POST ${MR_PATH}/approve`]: () => [201, {}],
+      [`GET ${MR_PATH}/approvals`]: () => [200, approvals],
+    });
+    const client = new GitLabClient("https://gitlab.test", async () => "t", f.impl);
+    const a = await client.approve(await client.getMergeRequest("team/api", 42));
+
+    expect(a).toEqual({ userHasApproved: true, userCanApprove: true, approvedBy: [{ name: "Me", username: "me" }] });
+    expect(f.calls.find((c) => c.url.endsWith("/approve"))!.body).toBe(JSON.stringify({ sha: "h".repeat(40) }));
+  });
+});
+
+describe("GitLabOAuth", () => {
+  const settings = {
+    gitlabUrl: "https://gitlab.test",
+    clientId: "cid",
+    clientSecret: "secret",
+    redirectUri: "https://map.test/auth/callback",
+  };
+
+  it("builds a PKCE authorize URL on the self-hosted GitLab", () => {
+    const { challenge } = pkcePair();
+    const url = new URL(new GitLabOAuth(settings).authorizeUrl("st", challenge));
+    expect(url.origin + url.pathname).toBe("https://gitlab.test/oauth/authorize");
+    expect(url.searchParams.get("client_id")).toBe("cid");
+    expect(url.searchParams.get("redirect_uri")).toBe("https://map.test/auth/callback");
+    expect(url.searchParams.get("scope")).toBe("api");
+    expect(url.searchParams.get("code_challenge_method")).toBe("S256");
+  });
+
+  it("exchanges the code for tokens", async () => {
+    const f = fakeFetch({
+      "POST /oauth/token": () => [200, { access_token: "A", refresh_token: "R", expires_in: 60 }],
+    });
+    const t = await new GitLabOAuth(settings, f.impl).exchange("code1", "ver1");
+    expect(t.accessToken).toBe("A");
+    expect(t.refreshToken).toBe("R");
+    const sent = new URLSearchParams(f.calls[0].body!);
+    expect(sent.get("code")).toBe("code1");
+    expect(sent.get("code_verifier")).toBe("ver1");
+    expect(sent.get("client_secret")).toBe("secret");
+  });
+});
+
+describe("GitRepoCache", () => {
+  let remote: FixtureRepo | null = null;
+  let cacheDir: string | null = null;
+  afterEach(() => {
+    remote?.cleanup();
+    if (cacheDir) rmSync(cacheDir, { recursive: true, force: true });
+    remote = null;
+    cacheDir = null;
+  });
+
+  it("fetches the target branch and the MR head from the remote", async () => {
+    remote = createFixtureRepo();
+    remote.write("a.ts", "export const a = 1;\n");
+    remote.commit("base");
+    const base = remote.git("rev-parse", "HEAD");
+    remote.git("checkout", "-q", "-b", "feature");
+    remote.write("a.ts", "export const a = 2;\n");
+    remote.commit("change");
+    const head = remote.git("rev-parse", "HEAD");
+    remote.git("update-ref", "refs/merge-requests/5/head", head);
+    remote.git("checkout", "-q", "main");
+
+    cacheDir = mkdtempSync(join(tmpdir(), "gitmap-cache-"));
+    const mr: MergeRequestInfo = {
+      projectPath: "team/api", iid: 5, title: "t", webUrl: "", state: "opened",
+      author: { name: "a", username: "a" }, sourceBranch: "feature", targetBranch: "main",
+      diffRefs: { baseSha: base, headSha: head, startSha: base }, cloneUrl: remote.dir,
+    };
+    const cache = new GitRepoCache(cacheDir);
+    const dir = await cache.prepare(mr, "tok");
+
+    expect(dir).toBe(join(cacheDir, "team_api.git"));
+    // Second call is a no-op because both commits are present.
+    expect(await cache.prepare(mr, "tok")).toBe(dir);
+  });
+});
+
+describe("ReviewMergeRequestUseCase", () => {
+  const mr: MergeRequestInfo = {
+    projectPath: "team/api", iid: 42, title: "t", webUrl: "", state: "opened",
+    author: { name: "a", username: "a" }, sourceBranch: "f", targetBranch: "main",
+    diffRefs: { baseSha: "b", headSha: "h", startSha: "s" }, cloneUrl: "",
+  };
+
+  function fakeHost(rejectLine = false) {
+    const created: unknown[] = [];
+    const host = {
+      getMergeRequest: async () => mr,
+      listDiscussions: async () => [],
+      getApprovals: async () => ({ userHasApproved: false, userCanApprove: true, approvedBy: [] }),
+      createDiscussion: async (_mr: MergeRequestInfo, c: { body: string; position?: unknown }) => {
+        if (c.position && rejectLine) throw new PositionRejectedError("no");
+        created.push(c);
+        return { id: "d", resolved: false, position: null, notes: [] };
+      },
+    } as unknown as MergeRequestHostPort;
+    return { host, created };
+  }
+
+  it("analyses once per base..head", async () => {
+    let runs = 0;
+    const uc = new ReviewMergeRequestUseCase(
+      { prepare: async () => "/repo" },
+      () => (runs++, { base: "b", head: "h", symbols: [], nodes: [], edges: [], files: [] }),
+    );
+    const { host } = fakeHost();
+    await uc.open(host, "t", "team/api", 42);
+    await uc.open(host, "t", "team/api", 42);
+    expect(runs).toBe(1);
+  });
+
+  it("falls back to a general comment that quotes the line", async () => {
+    const uc = new ReviewMergeRequestUseCase({ prepare: async () => "" }, () => { throw new Error(); });
+    const { host, created } = fakeHost(true);
+    const position = { path: "src/app.ts", oldLine: 12, newLine: 12 };
+    const r = await uc.comment(host, "team/api", 42, { body: "Needs the ttl", position, code: "new SessionStore(db)" });
+
+    expect(r.fallback).toBe(true);
+    expect(created).toEqual([{ body: quoteLine(position, "new SessionStore(db)", "Needs the ttl") }]);
+    expect(quoteLine(position, "x", "y")).toBe("**`src/app.ts:12`**\n```\nx\n```\n\ny");
+  });
+});
