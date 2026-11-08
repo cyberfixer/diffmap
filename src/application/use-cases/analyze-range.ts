@@ -56,8 +56,13 @@ export class AnalyzeRangeUseCase {
     const { nodes, edges } = this.buildGraph(symbols, resolvedHead, options.depth ?? 1);
 
     const range = this.diffReader.describeRange?.(base, head, mergeBase);
+    const parsedFiles = [...new Set(symbols.map((s) => s.file))];
+    const exactFiles = parsedFiles.filter((p) =>
+      this.graphBuilders.some((g) => g.supportedExtensions.includes(extname(p).toLowerCase()) && g.isExact?.(p) === true)
+    );
+    const exactness = { exact: exactFiles.length, total: parsedFiles.length };
 
-    return { base: resolvedBase, head: resolvedHead, symbols, nodes, edges, files, ...(range ? { range } : {}) };
+    return { base: resolvedBase, head: resolvedHead, symbols, nodes, edges, files, exactness, ...(range ? { range } : {}) };
   }
 
   private buildGraph(

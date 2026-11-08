@@ -22,5 +22,7 @@ export interface CallGraphResult {
  */
 export interface CallGraphPort {
   readonly supportedExtensions: readonly string[];
+  /** True when calls in this file are resolved by a compiler (not by matching names). */
+  isExact?(path: string): boolean;
   build(input: CallGraphInput): CallGraphResult;
 }

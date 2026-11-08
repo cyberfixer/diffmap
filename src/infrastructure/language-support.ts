@@ -8,11 +8,18 @@ import { TreeSitterEngine } from "./parsers/tree-sitter/engine.js";
 import { TreeSitterSymbolParser } from "./parsers/tree-sitter/tree-sitter.adapter.js";
 import { TreeSitterCallGraph } from "./parsers/tree-sitter/tree-sitter-call-graph.js";
 import { TreeSitterHighlighter } from "./parsers/tree-sitter/tree-sitter-highlighter.js";
+import { Project } from "ts-morph";
+import { extname } from "node:path";
+import { listSymbolNodes } from "./parsers/typescript/symbols.js";
+import { ScipCallGraph, type ListedSymbol } from "./scip/scip-call-graph.js";
+import type { ScipIndex } from "./scip/scip-index.js";
 
 export interface LanguageSupport {
   parsers: SymbolParserPort[];
   graphs: CallGraphPort[];
   highlighters: SyntaxHighlighterPort[];
+  /** gitmap's symbols in many files at once (same names as the parsers give). */
+  listSymbols: (files: { path: string; source: string }[]) => Map<string, ListedSymbol[]>;
 }
 
 let loading: Promise<LanguageSupport> | null = null;
@@ -26,6 +33,27 @@ export function loadLanguageSupport(): Promise<LanguageSupport> {
     parsers: [new TsMorphAdapter(), new TreeSitterSymbolParser(engine)],
     graphs: [new TsMorphCallGraph(), new TreeSitterCallGraph(engine)],
     highlighters: [new TsHighlighter(), new TreeSitterHighlighter(engine)],
+    listSymbols: (files) => {
+      const out = new Map<string, ListedSymbol[]>();
+      const ts = files.filter((f) => /\.tsx?$/i.test(f.path));
+      if (ts.length) {
+        const project = new Project({ useInMemoryFileSystem: true, skipAddingFilesFromTsConfig: true });
+        for (const f of ts) {
+          const sf = project.createSourceFile("/" + f.path, f.source, { overwrite: true });
+          out.set(f.path, listSymbolNodes(sf).map((s) => ({ ...s.info, labels: s.labels })));
+        }
+      }
+      for (const f of files) {
+        if (!out.has(f.path) && engine.extensions.includes(extname(f.path).toLowerCase())) out.set(f.path, engine.symbols(f.path, f.source));
+      }
+      return out;
+    },
   }));
   return loading;
+}
+
+/** The same languages, with calls resolved from a SCIP index where it covers a file. */
+export function withIndex(langs: LanguageSupport, index: ScipIndex | null): LanguageSupport {
+  if (!index || index.documents.length === 0) return langs;
+  return { ...langs, graphs: [new ScipCallGraph(index, langs.graphs, langs.listSymbols)] };
 }

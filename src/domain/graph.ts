@@ -27,8 +27,9 @@ export interface GraphEdge {
   /**
    * "calls": ordinary call resolved at head.
    * "calls-removed": a call at head to a symbol the diff removed (possible breakage).
+   * "implements": `from` implements `to` (a class method implementing an interface method).
    */
-  kind: "calls" | "calls-removed";
+  kind: "calls" | "calls-removed" | "implements";
   /** Where in the caller the call is made (head line numbers). */
   sites?: CallSite[];
 }

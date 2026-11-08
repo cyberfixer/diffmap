@@ -31,20 +31,23 @@ export function walkNeighbourhood(input: {
   depth: number;
 }): CallGraphResult {
   const { meta, linesOf, calls, depth } = input;
+  // Calls and "implements" links both count as neighbours; each pair keeps its edges.
   const out = new Map<string, Set<string>>();
   const inn = new Map<string, Set<string>>();
+  const between = new Map<string, ResolvedCall[]>();
   for (const e of calls.values()) {
-    if (e.kind !== "calls") continue;
+    if (e.kind === "calls-removed") continue;
     (out.get(e.from) ?? out.set(e.from, new Set()).get(e.from)!).add(e.to);
     (inn.get(e.to) ?? inn.set(e.to, new Set()).get(e.to)!).add(e.from);
+    const pair = `${e.from}>${e.to}`;
+    between.set(pair, [...(between.get(pair) ?? []), e]);
   }
 
   const changed = new Set(input.changedIds.filter((id) => meta.has(id)));
   const included = new Set(changed);
   const edges = new Map<string, GraphEdge>();
   const keep = (from: string, to: string): void => {
-    const key = `${from}>${to}>calls`;
-    edges.set(key, calls.get(key)!);
+    for (const e of between.get(`${from}>${to}`) ?? []) edges.set(`${from}>${to}>${e.kind}`, e);
   };
 
   for (const direction of ["callees", "callers"] as const) {

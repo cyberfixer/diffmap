@@ -137,8 +137,8 @@ describe("renderHtml", () => {
     expect(upd.before).toEqual(["  return <em>old</em>;"]);
     expect(upd.after).toEqual(["  return 2;"]);
     expect(upd.refs).toEqual([
-      { file: "svc.ts", line: 25, text: "// line 25", el: "L0-25", out: false, bad: false },
-      { file: "ctl.ts", line: 9, text: "    return this.svc.update(id);", el: "U0-9", out: true, bad: false },
+      { file: "svc.ts", line: 25, text: "// line 25", el: "L0-25", out: false, bad: false, impl: false },
+      { file: "ctl.ts", line: 9, text: "    return this.svc.update(id);", el: "U0-9", out: true, bad: false, impl: false },
     ]);
     expect(syms[1].refs[0].bad).toBe(true);
   });

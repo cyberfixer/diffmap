@@ -11,6 +11,10 @@ import { listSymbolNodes } from "./symbols.js";
 export class TsMorphCallGraph implements CallGraphPort {
   readonly supportedExtensions = [".ts", ".tsx"] as const;
 
+  isExact(): boolean {
+    return true; // the TypeScript type checker resolves every call
+  }
+
   build(input: CallGraphInput): CallGraphResult {
     // Load the whole repo at head into memory so the type checker can resolve
     // calls across files (this.service.update() -> Service.update).

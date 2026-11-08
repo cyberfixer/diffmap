@@ -1,13 +1,16 @@
 import { AnalyzeRangeUseCase } from "../../application/use-cases/analyze-range.js";
 import { GitDiffReader } from "../../infrastructure/git/git-diff-reader.js";
 import { GitSourceReader } from "../../infrastructure/git/git-source-reader.js";
-import { loadLanguageSupport } from "../../infrastructure/language-support.js";
+import { readFileSync } from "node:fs";
+import { loadLanguageSupport, withIndex } from "../../infrastructure/language-support.js";
+import { decodeScip } from "../../infrastructure/scip/scip-index.js";
 import { renderHtml } from "../html/render-html.js";
 
 function usage(): void {
   console.error(
-    "Usage: git-map <base>[..<head>] [--format json|html] [--depth N]\n\n" +
-      "Examples:\n  git-map main\n  git-map main..HEAD\n  git-map main --format html > report.html"
+    "Usage: git-map <base>[..<head>] [--format json|html] [--depth N] [--scip index.scip]...\n\n" +
+      "  --scip FILE   exact calls from a SCIP index (scip-typescript, scip-java, scip-clang); repeatable\n\n" +
+      "Examples:\n  git-map main\n  git-map main..HEAD\n  git-map main --format html > report.html\n  git-map main --scip index.scip --format html > report.html"
   );
 }
 
@@ -16,12 +19,17 @@ export async function runCli(): Promise<void> {
 
   let format = "json";
   let depth = 1;
+  const scipFiles: string[] = [];
   const positional: string[] = [];
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--format") {
       format = args[++i] ?? "";
     } else if (args[i].startsWith("--format=")) {
       format = args[i].slice("--format=".length);
+    } else if (args[i] === "--scip") {
+      scipFiles.push(args[++i] ?? "");
+    } else if (args[i].startsWith("--scip=")) {
+      scipFiles.push(args[i].slice("--scip=".length));
     } else if (args[i] === "--depth") {
       depth = Number(args[++i]);
     } else if (args[i].startsWith("--depth=")) {
@@ -67,7 +75,9 @@ export async function runCli(): Promise<void> {
   }
 
   try {
-    const langs = await loadLanguageSupport();
+    // Several index files are simply joined: SCIP merges them.
+    const index = scipFiles.length ? decodeScip(Buffer.concat(scipFiles.map((f) => readFileSync(f)))) : null;
+    const langs = withIndex(await loadLanguageSupport(), index);
     const useCase = new AnalyzeRangeUseCase(new GitDiffReader(), new GitSourceReader(), langs.parsers, langs.graphs);
     const result = useCase.execute(base, head, { depth });
     process.stdout.write(

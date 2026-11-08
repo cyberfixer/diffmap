@@ -18,4 +18,6 @@ export interface AnalysisResult {
   edges: GraphEdge[];
   files: FileView[];         // whole-file views of every changed, parsed file
   range?: RangeInfo;
+  /** Of the changed files with symbols, how many have calls resolved by a compiler (TypeScript, or a CI index). */
+  exactness?: { exact: number; total: number };
 }

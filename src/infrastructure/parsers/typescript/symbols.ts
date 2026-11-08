@@ -31,6 +31,16 @@ export function listSymbolNodes(sourceFile: SourceFile): SymbolNode[] {
     } else if (Node.isClassDeclaration(node)) {
       name = node.getName() ?? null;
       if (name) kind = "class";
+    } else if (Node.isInterfaceDeclaration(node)) {
+      name = node.getName();
+      kind = "interface";
+    } else if (Node.isMethodSignature(node)) {
+      const owner = node.getFirstAncestorByKind(SyntaxKind.InterfaceDeclaration);
+      name = owner ? `${owner.getName()}.${node.getName()}` : node.getName();
+      kind = "method";
+    } else if (Node.isEnumDeclaration(node)) {
+      name = node.getName();
+      kind = "enum";
     } else if (Node.isVariableDeclaration(node)) {
       const init = node.getInitializer();
       if (init && Node.isArrowFunction(init)) {

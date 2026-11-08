@@ -149,6 +149,7 @@ interface Ref {
   el: string; // id of the code row in the map
   out: boolean; // the caller's file is outside the diff
   bad: boolean; // a call to code this diff removed
+  impl: boolean; // the caller implements this symbol (interface method -> class method)
 }
 
 interface SymInfo {
@@ -238,6 +239,7 @@ export function renderHtml(
         el: inDiff ? `L${viewIdx.get(caller.file)}-${s.line}` : `U${ciOf.get(caller.id)}-${s.line}`,
         out: !inDiff,
         bad: e.kind === "calls-removed",
+        impl: e.kind === "implements",
       });
     }
   }
@@ -426,6 +428,7 @@ export function renderHtml(
     <span class="pill mono"><span class="add">+${addedLines}</span><span class="del">−${removedLines}</span></span>
     <span class="pill">${views.length} file${views.length === 1 ? "" : "s"} · ${changed.length} symbol${changed.length === 1 ? "" : "s"}</span>
     ${warnPill}
+    ${exactPill(result)}
     ${mrPage ? mrActions(mrPage) : ""}
   </div>
 </header>
@@ -471,6 +474,7 @@ export function renderHtml(
       <span><span class="sw u"></span>Usage line</span>
       <span><span class="sw o"></span>File not in diff</span>
       <span><span class="ln-s"></span>Used by</span>
+      <span><span class="ln-i"></span>Implemented by</span>
       <span><span class="ln-r"></span>Call to removed code</span>
       <span style="margin-left:auto;color:var(--muted)">drag or scroll to move · ctrl+scroll to zoom · Esc clears selection</span>
     </div>
@@ -512,4 +516,17 @@ function mrActions(p: MrPage): string {
     <a class="hbtn" href="${esc(p.mr.webUrl)}">Open in GitLab</a>
     <button class="hbtn ${a.userHasApproved ? "" : "primary"}" id="approve" type="button" aria-pressed="${a.userHasApproved}"${disabled}>${label}</button>
     <form method="post" action="/auth/logout" class="who"><span title="Signed in as @${esc(p.user.username)}">${esc(p.user.name)}</span><button type="submit" class="link">Sign out</button></form>`;
+}
+
+/** Whether arrows come from a compiler (exact) or from matching names. */
+function exactPill(result: AnalysisResult): string {
+  const x = result.exactness;
+  if (!x || x.total === 0) return "";
+  if (x.exact === x.total) {
+    return `<span class="pill" title="Calls are resolved by a compiler (TypeScript, or an index from CI)">Calls: exact</span>`;
+  }
+  const title = "Calls in some languages are matched by name, so two functions with the same name can both be linked. Add a gitmap-index CI job for exact results (see README).";
+  return x.exact === 0
+    ? `<span class="pill" title="${title}">Calls: matched by name</span>`
+    : `<span class="pill" title="${title}">Calls: exact in ${x.exact} of ${x.total} files</span>`;
 }

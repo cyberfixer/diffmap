@@ -77,7 +77,7 @@ export const CLIENT_SCRIPT = `
           var lane2 = x0 + 28 + (nOut++ % 12) * 12;
           d = 'M' + x0 + ',' + a + ' H' + lane2 + ' V' + b + ' H' + (D.rightX - 3);
         }
-        var cls = 'edge' + (r.bad ? ' bad' : '') + (sel !== null ? ' on' : '');
+        var cls = 'edge' + (r.bad ? ' bad' : '') + (r.impl ? ' impl' : '') + (sel !== null ? ' on' : '');
         parts.push('<path class="' + cls + '" d="' + d + '" marker-end="url(#' + (r.bad ? 'ah-bad' : 'ah') + ')"/>');
       });
     });
@@ -294,8 +294,12 @@ export const CLIENT_SCRIPT = `
     var text;
     if (n === 0) text = word + '. ' + (sy.status === 'added' ? 'Not called anywhere yet.' : 'No calls to it were found in the repo.');
     else if (sy.status === 'removed') text = 'Removed, but still called in ' + plural(n, 'place', 'places') + '.';
-    else text = word + '. Called in ' + plural(n, 'place', 'places') +
-      (nOut ? ': ' + (n - nOut) + ' inside this change, ' + nOut + ' outside it.' : ', all inside this change.');
+    else {
+      var nImpl = sy.refs.filter(function (r) { return r.impl; }).length;
+      text = word + '. Used in ' + plural(n, 'place', 'places') +
+        (nOut ? ': ' + (n - nOut) + ' inside this change, ' + nOut + ' outside it.' : ', all inside this change.') +
+        (nImpl ? ' ' + plural(nImpl, 'class implements', 'classes implement') + ' it.' : '');
+    }
     dt.appendChild(h('p', 'summary', text));
 
     if (sy.before.length || sy.after.length) {
@@ -308,12 +312,12 @@ export const CLIENT_SCRIPT = `
 
     if (n) {
       var rs = h('div', 'sec');
-      rs.appendChild(h('h3', '', (sy.status === 'removed' ? 'Still called in ' : 'Called in ') + plural(n, 'place', 'places')));
+      rs.appendChild(h('h3', '', (sy.status === 'removed' ? 'Still used in ' : 'Used in ') + plural(n, 'place', 'places')));
       sy.refs.forEach(function (r) {
         var b = h('button', 'ref' + (r.out ? ' out' : '') + (r.bad ? ' bad' : ''));
         b.type = 'button';
         b.title = r.out ? 'Outside the diff · show in map' : 'Show in map';
-        b.appendChild(h('span', 'rl', r.file + ':' + r.line));
+        b.appendChild(h('span', 'rl', r.file + ':' + r.line + (r.impl ? '  · implements it' : '')));
         b.appendChild(h('pre', 'snip c', r.text.trim()));
         b.addEventListener('click', function () {
           if (r.out && !showOut) sw.click();

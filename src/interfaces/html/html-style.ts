@@ -112,6 +112,7 @@ export const STYLE = `
   .sw.o { background:var(--panel); border:1px dashed var(--faint); }
   .ln-s { width:22px; border-top:2px solid var(--edge); }
   .ln-r { width:22px; border-top:2px dashed var(--del-fg); }
+  .ln-i { width:22px; border-top:2px dashed var(--edge); }
 
   /* ── code cards ── */
   .card { position:absolute; background:var(--panel); border:1px solid var(--line-strong); border-radius:10px; overflow:hidden; }
@@ -166,6 +167,7 @@ export const STYLE = `
   #sv .edge.on { opacity:1; stroke-width:2; }
   #sv .edge.bad { stroke:var(--del-fg); stroke-dasharray:6 4; opacity:.8; }
   #sv .edge.bad.on { opacity:1; }
+  #sv .edge.impl { stroke-dasharray:6 5; }
   #sv marker path { fill:var(--edge); } #sv #ah-bad path { fill:var(--del-fg); }
 
   /* ── details ── */
