@@ -9,9 +9,10 @@ There are two ways to use it:
 
 1. **[Command line](#1-command-line)**: make a review page for any two branches or
    commits in a repo on your machine. The quickest way to try it.
-2. **[GitLab service (Docker)](#2-gitlab-service-docker)**: open any merge request as
-   a map, comment on lines, approve, and track what you have viewed. Works with
-   self-hosted GitLab and gitlab.com.
+2. **[Service for GitLab and GitHub (Docker)](#2-service-for-gitlab-and-github-docker)**:
+   open any merge request or pull request as a map, comment on lines, approve,
+   and track what you have viewed. Works with self-hosted GitLab, gitlab.com,
+   github.com and GitHub Enterprise.
 
 ## Languages
 
@@ -89,107 +90,138 @@ diffmap <base>[..<head>] [--format json|html] [--depth N] [--scip FILE]...
 Run the script directly: `node /path/to/diffmap/bin/diffmap.js main --format html > report.html`
 </details>
 
-## 2. GitLab service (Docker)
+## 2. Service for GitLab and GitHub (Docker)
 
-People open a merge request and see it as a map. They only ever see projects
-they can already see in GitLab. There are two modes:
+People open a merge request (GitLab) or pull request (GitHub) and see it as a
+map. They only ever see projects they can already see on that host.
+
+Each host gets **its own container** from the same image. Run one or both:
+
+| Container | Host | Settings file | Port |
+|---|---|---|---|
+| `diffmap-gitlab` | GitLab (self-hosted or gitlab.com) | `.env.gitlab` | 8080 |
+| `diffmap-github` | GitHub (github.com or GitHub Enterprise) | `.env.github` | 8081 |
+
+Each container runs in one of two modes:
 
 | Mode | Setup | People sign in with | Comment & approve |
 |---|---|---|---|
-| **Full** | a GitLab application (ID + secret), [step 1](#step-1-create-an-application-in-gitlab) | "Sign in with GitLab" | ✅ goes straight to GitLab |
-| **View-only** | nothing in GitLab; leave `GITLAB_CLIENT_ID` and `GITLAB_CLIENT_SECRET` out | their own GitLab access token (scopes `read_api`, `read_repository`) | ❌ (existing comments are shown) |
+| **Full** | an OAuth application on the host (ID + secret), [step 1](#step-1-optional-create-an-oauth-application) | "Sign in with GitLab / GitHub" | ✅ goes straight to the host |
+| **View-only** | nothing; leave the client ID and secret empty | their own access token | ❌ (existing comments are shown) |
 
-View-only mode is the quickest start: skip step 1. On the sign-in page each
-person follows a link that opens GitLab's token page already filled in, creates
-a token and pastes it. The token stays in diffmap's memory only and is
-forgotten on sign-out.
+View-only mode is the quickest start: skip step 1. The sign-in page links to
+the host's token page; each person creates a token and pastes it. The token
+stays in diffmap's memory only and is forgotten on sign-out.
 
-### Step 1: create an application in GitLab
+### Step 1 (optional): create an OAuth application
 
-*(Full mode only. For view-only mode skip this step.)*
+*Full mode only. For view-only mode skip this step.*
+
+**GitLab**
 
 | GitLab | Where |
 |---|---|
 | Self-hosted, for everyone | **Admin Area → Applications → Add new application** |
-| gitlab.com, or just for you | **Edit profile → Applications → Add new application** |
+| gitlab.com, or just for you | **Preferences → Applications → Add new application** (https://gitlab.com/-/user_settings/applications) |
 
-- **Name:** diffmap
-- **Redirect URI:** `<PUBLIC_URL>/auth/callback`
-  (e.g. `https://diffmap.company.com/auth/callback`, or `http://localhost:8080/auth/callback` to try it locally)
-- **Confidential:** yes
-- **Scopes:** `api`
+- **Redirect URI:** `<PUBLIC_URL>/auth/callback`, e.g. `http://localhost:8080/auth/callback`
+- **Confidential:** yes · **Scopes:** `api`
 
-Save it and copy the **Application ID** and **Secret**.
+**GitHub**
+
+| GitHub | Where |
+|---|---|
+| For your organization | **Organization settings → Developer settings → OAuth Apps → New OAuth App** |
+| Just for you | **Settings → Developer settings → OAuth Apps → New OAuth App** (https://github.com/settings/developers) |
+
+- **Homepage URL:** your `PUBLIC_URL`, e.g. `http://localhost:8081`
+- **Authorization callback URL:** `<PUBLIC_URL>/auth/callback`, e.g. `http://localhost:8081/auth/callback`
+- After creating it, click **Generate a new client secret**.
+
+Copy the **ID** and **secret** of either one.
 
 ### Step 2: run it
 
 In the `diffmap` folder (clone it as in [Install](#install-once) if you haven't):
 
 ```bash
-cp .env.example .env     # fill in GITLAB_URL, the ID, the secret and PUBLIC_URL
-docker compose up -d --build
+cp .env.gitlab.example .env.gitlab     # for GitLab: fill in GITLAB_URL, PUBLIC_URL (and the ID/secret for full mode)
+cp .env.github.example .env.github     # for GitHub: fill in PUBLIC_URL (and the ID/secret for full mode)
+
+docker compose up -d --build diffmap-gitlab    # just GitLab
+docker compose up -d --build diffmap-github    # just GitHub
+docker compose up -d --build                   # both
 ```
 
-`.env` holds your secret, so it is in `.gitignore` and never committed.
-Check it's running: `curl http://localhost:8080/healthz` prints `ok`.
+The `.env.*` files hold your secrets, so they are in `.gitignore` and never committed.
+Check: `curl http://localhost:8080/healthz` (GitLab) or `:8081` (GitHub) prints `ok`.
+The log says which host and mode each container runs: `docker compose logs`.
 
 <details>
 <summary>Plain Docker instead of compose</summary>
 
 ```bash
 docker build -t diffmap .
-docker run -d --name diffmap -p 8080:8080 -v diffmap-data:/data \
-  -e GITLAB_URL=https://gitlab.company.com \
-  -e GITLAB_CLIENT_ID=<application id> \
-  -e GITLAB_CLIENT_SECRET=<secret> \
-  -e PUBLIC_URL=https://diffmap.company.com \
+docker run -d --name diffmap-github -p 8081:8080 -v diffmap-github-data:/data \
+  -e CODE_HOST=github \
+  -e PUBLIC_URL=http://localhost:8081 \
   diffmap
 ```
+Use `-e CODE_HOST=gitlab -e GITLAB_URL=...` for GitLab, and add the client ID
+and secret variables for full mode.
 </details>
 
 | Setting | Meaning |
 |---|---|
+| `CODE_HOST` | `gitlab` or `github` (compose sets it for each container) |
 | `GITLAB_URL` | Your GitLab, e.g. `https://gitlab.company.com` or `https://gitlab.com` |
-| `GITLAB_CLIENT_ID` | Application ID from step 1 (leave out for view-only mode) |
-| `GITLAB_CLIENT_SECRET` | Secret from step 1 (leave out for view-only mode) |
-| `PUBLIC_URL` | Address people use to open diffmap (must match the redirect URI) |
+| `GITHUB_URL` | `https://github.com` (default) or your GitHub Enterprise address |
+| `GITLAB_CLIENT_ID`, `GITLAB_CLIENT_SECRET` / `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | From step 1; leave both empty for view-only mode |
+| `PUBLIC_URL` | Address people use to open this diffmap (must match the callback URL) |
 | `PORT` | Port inside the container (default `8080`) |
 | `DATA_DIR` | Where diffmap keeps its files (default `/data`; keep it on a volume) |
 | `CACHE_DIR` | Where project code is kept (default `$DATA_DIR/repos`) |
-| `ANALYSIS_WORKERS` | Merge requests analysed at the same time (default `2`; about one per CPU core is fine if memory allows) |
-| `INDEX_JOB`, `INDEX_ARTIFACT` | CI job and file with the exact index (default `diffmap-index`, `index.scip`) |
-| `NODE_EXTRA_CA_CERTS`, `GIT_SSL_CAINFO` | Path to your CA file if GitLab uses an internal certificate |
+| `ANALYSIS_WORKERS` | Reviews analysed at the same time (default `2`; about one per CPU core is fine if memory allows) |
+| `INDEX_JOB`, `INDEX_ARTIFACT` | CI job (GitLab) or Actions artifact (GitHub) with the exact index (default `diffmap-index`, `index.scip`) |
+| `NODE_EXTRA_CA_CERTS`, `GIT_SSL_CAINFO` | Path to your CA file if the host uses an internal certificate |
 
-### Step 3: open a merge request
+### Step 3: open a merge or pull request
 
-- Take any merge request URL and change only the host:
-  `https://gitlab.company.com/team/api/-/merge_requests/42` →
-  `https://diffmap.company.com/team/api/-/merge_requests/42`
-- Or open diffmap's start page and paste the MR link.
+Take its URL and change only the host to your diffmap:
 
-The first time, GitLab asks you to sign in. If the MR isn't ready yet, a
-progress screen shows the steps (download the code, analyse the changes) with
-git's real download progress, and opens the map when it's done.
+| On the host | On diffmap |
+|---|---|
+| `https://gitlab.company.com/team/api/-/merge_requests/42` | `http://localhost:8080/team/api/-/merge_requests/42` |
+| `https://github.com/acme/api/pull/42` | `http://localhost:8081/acme/api/pull/42` |
 
-On the map you can:
+Or open diffmap's start page and paste the link.
 
-- **Comment:** click a line number. The comment appears in GitLab as a normal
-  diff comment. A line in a file that isn't part of the MR (a caller somewhere
-  else) is posted as a general MR comment that quotes the line, because GitLab
-  can't attach a comment there.
+The first time, you sign in. If the review isn't ready yet, a progress screen
+shows the steps (download the code, analyse the changes) with git's real
+download progress, and opens the map when it's done.
+
+In full mode you can also:
+
+- **Comment:** click a line number. The comment appears on the host as a normal
+  line comment. A line in a file that isn't part of the review (a caller
+  somewhere else) is posted as a general comment that quotes the line, because
+  the host can't attach a comment there.
 - **Reply:** existing comments show under their lines; click **Reply**.
-- **Approve:** **Approve** / **Revoke approval** in the top bar works like GitLab's button.
-- **Mark as viewed:** tracks your progress per function. It is saved on the
-  server for your GitLab user, so it stays after closing the browser.
+- **Approve:** works like the host's button. On GitHub this submits an
+  "Approve" review; GitHub has no "unapprove", so **Revoke approval** dismisses
+  the review, which GitHub only allows for people with write access.
+
+In both modes, **Mark as viewed** tracks your progress per function. It is
+saved on the server for your user, so it stays after closing the browser.
 
 Good to know:
 
 - The first open of a project downloads its code. After that only new commits
-  are fetched, and each MR version is analysed once, then cached.
-- Analysis runs in background threads: a big MR doesn't slow down anyone else.
+  are fetched, and each review version is analysed once, then cached.
+- Analysis runs in background threads: a big review doesn't slow down anyone else.
   Any number of people can view maps at the same time.
-- Sign-ins are kept in memory on purpose: restarting the container signs everyone
-  out, and GitLab tokens are never written to disk.
+- Sign-ins are kept in memory on purpose: restarting a container signs everyone
+  out, and tokens are never written to disk.
 - In real use, run it behind HTTPS (a reverse proxy) and set `PUBLIC_URL` to the
   `https://` address.
 
@@ -223,9 +255,14 @@ system), **Light** and **Dark**; your choice is remembered in the browser.
 ## Exact calls from CI
 
 For exact calls outside TypeScript, let CI build an index with the language's own
-compiler. Copy the jobs you need from
-[`ci/diffmap-index.gitlab-ci.yml`](ci/diffmap-index.gitlab-ci.yml) into your project's
-`.gitlab-ci.yml`. The job must be called `diffmap-index` and save `index.scip`.
+compiler:
+
+- **GitLab:** copy the jobs you need from
+  [`ci/diffmap-index.gitlab-ci.yml`](ci/diffmap-index.gitlab-ci.yml) into your project's
+  `.gitlab-ci.yml`. The job must be called `diffmap-index` and save `index.scip`.
+- **GitHub:** copy [`ci/diffmap-index.github-workflow.yml`](ci/diffmap-index.github-workflow.yml)
+  to `.github/workflows/` in your repository. It uploads an artifact called
+  `diffmap-index` holding `index.scip`.
 
 | Language | Indexer | Notes |
 |---|---|---|
@@ -234,8 +271,8 @@ compiler. Copy the jobs you need from
 | C, C++ | [scip-clang](https://github.com/sourcegraph/scip-clang) | needs `compile_commands.json` from your build |
 | Swift | none available yet | stays on name matching |
 
-- **Service:** diffmap finds the `diffmap-index` job for the MR's head commit by
-  itself. If the job is still running, the map opens with name matching (the
+- **Service:** diffmap finds the `diffmap-index` job (GitLab) or artifact (GitHub)
+  for the review's head commit by itself. If the job is still running, the map opens with name matching (the
   header says *exact index still building*) and switches to exact calls on a later visit.
 - **CLI:** `--scip index.scip`. Several index files can be passed, or joined with
   `cat a.scip b.scip > index.scip`.

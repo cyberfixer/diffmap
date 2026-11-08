@@ -1,16 +1,44 @@
-# Settings come from .env (copy .env.example to .env and fill it in).
+# One container per code host, from the same image. Start one or both:
+#   docker compose up -d diffmap-gitlab     # settings in .env.gitlab, port 8080
+#   docker compose up -d diffmap-github     # settings in .env.github, port 8081
+#   docker compose up -d                    # both
+# Copy .env.gitlab.example / .env.github.example and fill them in (never committed).
+
+x-diffmap: &diffmap
+  build: .
+  image: diffmap:latest
+  restart: unless-stopped
+  # If the code host is on your LAN under a name the container can't resolve:
+  # extra_hosts:
+  #   - "gitlab.lan:192.168.1.10"
+
 services:
-  diffmap:
-    build: .
-    image: diffmap:latest
-    restart: unless-stopped
+  diffmap-gitlab:
+    <<: *diffmap
     ports:
       - "8080:8080"
-    env_file: .env
+    environment:
+      CODE_HOST: gitlab
+    env_file:
+      - path: .env.gitlab
+        required: false
     volumes:
-      - diffmap-data:/data
-      # If GitLab uses an internal CA, mount it and set the CA paths in .env:
+      - diffmap-gitlab-data:/data
+      # If GitLab uses an internal CA, mount it and set the CA paths in .env.gitlab:
       # - ./certs:/certs:ro
 
+  diffmap-github:
+    <<: *diffmap
+    ports:
+      - "8081:8080"
+    environment:
+      CODE_HOST: github
+    env_file:
+      - path: .env.github
+        required: false
+    volumes:
+      - diffmap-github-data:/data
+
 volumes:
-  diffmap-data:
+  diffmap-gitlab-data:
+  diffmap-github-data:

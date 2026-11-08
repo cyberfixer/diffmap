@@ -1,0 +1,38 @@
+# diffmap: exact calls from a compiler-made index (SCIP), for GitHub.
+#
+# Copy to .github/workflows/diffmap-index.yml in your repository. diffmap looks
+# for an artifact named "diffmap-index" (holding index.scip) from a successful
+# run for the pull request's head commit. Without it, diffmap still works,
+# matching calls by name.
+
+name: diffmap-index
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  index:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── TypeScript / JavaScript (and Angular) ──
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: npx --yes @sourcegraph/scip-typescript@0.3.15 index --output index.scip
+
+      # ── Java / Kotlin (Maven, Gradle or sbt): use instead of the steps above ──
+      # - run: docker run --rm -v "$PWD:/sources" -w /sources sourcegraph/scip-java:latest scip-java index --output index.scip
+
+      # ── Several languages: write ts.scip, java.scip, ... then join them ──
+      # - run: cat *.scip > index.scip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: diffmap-index
+          path: index.scip
+          retention-days: 30

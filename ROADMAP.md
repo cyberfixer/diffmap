@@ -8,6 +8,9 @@
 
 ## Done
 
+### 21. GitHub pull requests — DONE
+- One container per host (`diffmap-gitlab`, `diffmap-github`). GitHub: pull requests incl. forks, review and conversation comments, line comments, replies, Approve (an APPROVE review), exact index from an Actions artifact, GitHub Enterprise. Full mode with a GitHub OAuth App, or view-only with personal tokens.
+
 ### 3. Arrow functions as class properties — DONE
 - `handler = () => {...}` (and `= function () {}`) inside a class is a symbol in TypeScript and JavaScript; `this.handler()` links to it inside its class.
 

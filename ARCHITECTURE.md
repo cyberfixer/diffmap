@@ -12,7 +12,7 @@ at the end tells you which file to open for a given change.
 flowchart LR
   subgraph in["Where the change comes from"]
     CLI["Command line<br/>diffmap main"]
-    MR["GitLab merge request<br/>(web service)"]
+    MR["GitLab merge request or<br/>GitHub pull request<br/>(web service)"]
   end
 
   subgraph core["The analysis (same for both)"]
@@ -193,6 +193,20 @@ flowchart LR
 
 ## 8. Journey 2: opening a merge request in the service
 
+One container serves one code host, chosen with `CODE_HOST` (`gitlab` or
+`github`). Everything below is the same for both; only the adapters differ:
+
+| | GitLab | GitHub |
+|---|---|---|
+| API client | [gitlab/gitlab-client.ts](src/infrastructure/gitlab/gitlab-client.ts) | [github/github-client.ts](src/infrastructure/github/github-client.ts) |
+| Sign-in (full mode) | [gitlab/gitlab-oauth.ts](src/infrastructure/gitlab/gitlab-oauth.ts) | [github/github-oauth.ts](src/infrastructure/github/github-oauth.ts) |
+| Review code ref | `refs/merge-requests/<iid>/head` | `refs/pull/<n>/head` |
+| Exact index | CI job artifact | Actions artifact (a zip, read by [storage/zip.ts](src/infrastructure/storage/zip.ts)) |
+| Names, URL shapes, wording | [server/host-profile.ts](src/interfaces/server/host-profile.ts) | same file |
+
+The diagram uses GitLab:
+
+
 ```mermaid
 sequenceDiagram
   participant B as Browser
@@ -223,10 +237,10 @@ sequenceDiagram
 
 | Part | File | What it does |
 |---|---|---|
-| Settings | [server/config.ts](src/interfaces/server/config.ts) | Reads `GITLAB_URL`, client id/secret, `PUBLIC_URL`, folders, worker count, index job name. |
+| Settings | [server/config.ts](src/interfaces/server/config.ts) | Reads `CODE_HOST`, that host's URL and client id/secret (`GITLAB_*` or `GITHUB_*`), `PUBLIC_URL`, folders, worker count, index job name. |
 | Sign-in | [gitlab/gitlab-oauth.ts](src/infrastructure/gitlab/gitlab-oauth.ts), [server/sessions.ts](src/interfaces/server/sessions.ts) | **Full mode:** "Sign in with GitLab" (authorization code + PKCE + one-time state); tokens refresh shortly before they expire. **View-only mode** (no client ID/secret configured): each person pastes their own access token at `/auth/token`; diffmap checks it and its scopes with GitLab. Either way, sessions and tokens are kept **in memory only**: a restart signs everyone out. |
 | GitLab API | [gitlab/gitlab-client.ts](src/infrastructure/gitlab/gitlab-client.ts) | MR details, discussions, new comments, replies, approvals, and finding the CI index, all **as the signed-in user**. |
-| Code | [gitlab/git-repo-cache.ts](src/infrastructure/gitlab/git-repo-cache.ts) | One bare git repo per project on the data volume. Fetches only the target branch and GitLab's `refs/merge-requests/<iid>/head`, with the user's token. Reports git's progress. |
+| Code | [git/git-repo-cache.ts](src/infrastructure/git/git-repo-cache.ts) | One bare git repo per project on the data volume. Fetches only the target branch and the review's ref (see the table above), with the user's token. Reports git's progress. |
 | Jobs and cache | [review-merge-request.ts](src/application/use-cases/review-merge-request.ts) | Getting an MR ready runs as a background job with a status the progress screen polls. Results are cached per `project@base..head` (last 20). Without an index, it looks again after a minute in case CI finished. |
 | Worker threads | [worker/](src/infrastructure/worker/) | The analysis is heavy, synchronous work; it runs in worker threads (`ANALYSIS_WORKERS`, default 2) so the server keeps answering everyone else. |
 | Routes | [server/server.ts](src/interfaces/server/server.ts) | Pages, sign-in, the MR page, and the JSON API used by the page (`/api/<project>/-/merge_requests/<iid>/…`: discussions, notes, approve, unapprove, viewed, status). In view-only mode the write routes answer 403 and the page has no comment box or Approve button. |
@@ -281,7 +295,7 @@ The browser scripts are checked by hand in a headless browser; see the commit me
 | Change what the page looks like | [html-style.ts](src/interfaces/html/html-style.ts) (colours, layout), [render-html.ts](src/interfaces/html/render-html.ts) (markup) |
 | Change how the page behaves | [html-client.ts](src/interfaces/html/html-client.ts), and [html-client-mr.ts](src/interfaces/html/html-client-mr.ts) for comments |
 | Add a CLI option | [cli/index.ts](src/interfaces/cli/index.ts) |
-| Add a service setting | [server/config.ts](src/interfaces/server/config.ts), [src/server.ts](src/server.ts), `.env.example`, README |
+| Add a service setting | [server/config.ts](src/interfaces/server/config.ts), [src/server.ts](src/server.ts), `.env.gitlab.example` and `.env.github.example`, README |
 | Call another GitLab API | the port [merge-request.port.ts](src/application/ports/merge-request.port.ts), then [gitlab-client.ts](src/infrastructure/gitlab/gitlab-client.ts) |
 | Add a route to the service | [server/server.ts](src/interfaces/server/server.ts) |
-| Support another code host (e.g. GitHub) | a new adapter implementing [merge-request.port.ts](src/application/ports/merge-request.port.ts); the analysis and the page stay as they are |
+| Support another code host (e.g. Bitbucket) | an adapter implementing [merge-request.port.ts](src/application/ports/merge-request.port.ts) (like [github-client.ts](src/infrastructure/github/github-client.ts)), a profile in [host-profile.ts](src/interfaces/server/host-profile.ts), and a branch in [src/server.ts](src/server.ts) and [config.ts](src/interfaces/server/config.ts); the analysis and the page stay as they are |
