@@ -8,6 +8,7 @@ export type SymbolKind =
   | "enum"
   | "trait"
   | "module"      // module, namespace, object (Ruby, Scala, Kotlin)
+  | "template"    // an Angular component's template
   | "top-level";  // changed lines that fall outside any named symbol
 
 export type ChangeStatus = "added" | "removed" | "modified";

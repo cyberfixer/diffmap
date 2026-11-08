@@ -12,6 +12,7 @@ import { Project } from "ts-morph";
 import { extname } from "node:path";
 import { listSymbolNodes } from "./parsers/typescript/symbols.js";
 import { ScipCallGraph, type ListedSymbol } from "./scip/scip-call-graph.js";
+import { AngularGraph, AngularTemplateParser } from "./parsers/angular/angular-graph.js";
 import type { ScipIndex } from "./scip/scip-index.js";
 
 export interface LanguageSupport {
@@ -30,8 +31,8 @@ let loading: Promise<LanguageSupport> | null = null;
  */
 export function loadLanguageSupport(): Promise<LanguageSupport> {
   loading ??= TreeSitterEngine.load().then((engine) => ({
-    parsers: [new TsMorphAdapter(), new TreeSitterSymbolParser(engine)],
-    graphs: [new TsMorphCallGraph(), new TreeSitterCallGraph(engine)],
+    parsers: [new TsMorphAdapter(), new TreeSitterSymbolParser(engine), new AngularTemplateParser()],
+    graphs: [new TsMorphCallGraph(), new TreeSitterCallGraph(engine), new AngularGraph()],
     highlighters: [new TsHighlighter(), new TreeSitterHighlighter(engine)],
     listSymbols: (files) => {
       const out = new Map<string, ListedSymbol[]>();
@@ -55,5 +56,8 @@ export function loadLanguageSupport(): Promise<LanguageSupport> {
 /** The same languages, with calls resolved from a SCIP index where it covers a file. */
 export function withIndex(langs: LanguageSupport, index: ScipIndex | null): LanguageSupport {
   if (!index || index.documents.length === 0) return langs;
-  return { ...langs, graphs: [new ScipCallGraph(index, langs.graphs, langs.listSymbols)] };
+  // Graphs that add their own kind of links (Angular templates) keep running next to the index.
+  const alongside = langs.graphs.filter((g) => (g as { alongsideIndex?: boolean }).alongsideIndex);
+  const replaced = langs.graphs.filter((g) => !alongside.includes(g));
+  return { ...langs, graphs: [new ScipCallGraph(index, replaced, langs.listSymbols), ...alongside] };
 }

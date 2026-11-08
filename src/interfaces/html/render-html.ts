@@ -74,6 +74,7 @@ const KIND_LABEL: Record<string, string> = {
   enum: "enum",
   trait: "trait",
   module: "module",
+  template: "template",
   "top-level": "top-level code",
 };
 

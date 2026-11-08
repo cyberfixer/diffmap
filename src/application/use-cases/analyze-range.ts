@@ -90,7 +90,7 @@ export class AnalyzeRangeUseCase {
           });
 
         const result = builder.build({ files, changedIds, removed, depth });
-        for (const n of result.nodes) nodes.set(n.id, n);
+        for (const n of result.nodes) if (!nodes.has(n.id)) nodes.set(n.id, n);
         for (const e of result.edges) edges.set(`${e.from}>${e.to}>${e.kind}`, e);
       }
     }
