@@ -1,0 +1,21 @@
+services:
+  gitmap:
+    build: .
+    image: gitmap:latest
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      GITLAB_URL: https://gitlab.example.com          # your self-hosted GitLab
+      GITLAB_CLIENT_ID: change-me                       # from the GitLab application
+      GITLAB_CLIENT_SECRET: change-me
+      PUBLIC_URL: http://localhost:8080                 # where people open gitmap
+      # If GitLab uses a certificate from an internal CA, mount it and set both:
+      # NODE_EXTRA_CA_CERTS: /certs/company-ca.pem    # for the GitLab API
+      # GIT_SSL_CAINFO: /certs/company-ca.pem         # for fetching code with git
+    volumes:
+      - gitmap-data:/data
+      # - ./certs:/certs:ro
+
+volumes:
+  gitmap-data:
