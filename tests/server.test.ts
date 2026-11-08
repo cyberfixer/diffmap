@@ -16,6 +16,12 @@ import {
   type NewComment,
 } from "../src/application/ports/merge-request.port.js";
 import { createFixtureRepo, type FixtureRepo } from "./fixtures/repo.js";
+import { FileViewedStore } from "../src/infrastructure/storage/file-viewed-store.js";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+const dataDir = mkdtempSync(join(tmpdir(), "gitmap-data-"));
 
 let repo: FixtureRepo;
 let server: Server;
@@ -75,6 +81,7 @@ beforeAll(async () => {
       refresh: async () => ({ accessToken: "A2", refreshToken: "R2", expiresAt: Date.now() + 3600_000 }),
     },
     hostFor: () => host,
+    viewed: new FileViewedStore(join(dataDir, "viewed.json")),
     review: new ReviewMergeRequestUseCase({ prepare: async () => repo.dir }, (dir, b, h) =>
       new AnalyzeRangeUseCase(new GitDiffReader(dir), new GitSourceReader(dir), [new TsMorphAdapter()], [new TsMorphCallGraph()]).execute(b, h),
     ),
@@ -87,11 +94,25 @@ beforeAll(async () => {
 afterAll(() => {
   server?.close();
   repo?.cleanup();
+  rmSync(dataDir, { recursive: true, force: true });
 });
 
 const get = (path: string, cookie = "") => fetch(base + path, { redirect: "manual", headers: cookie ? { cookie } : {} });
 const postJson = (path: string, cookie: string, body: unknown) =>
   fetch(base + path, { method: "POST", headers: { cookie, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+
+/** Open the MR page, waiting through the progress screen like the browser does. */
+async function openMap(cookie: string): Promise<{ status: number; html: string; headers: Headers }> {
+  for (let i = 0; i < 100; i++) {
+    const r = await get("/team/api/-/merge_requests/42", cookie);
+    const html = await r.text();
+    if (!html.includes('id="s1"')) return { status: r.status, html, headers: r.headers };
+    const s = await (await get("/api/team/api/-/merge_requests/42/status", cookie)).json();
+    if (s.state === "error") throw new Error(s.error);
+    await new Promise((res) => setTimeout(res, 50));
+  }
+  throw new Error("map never became ready");
+}
 
 /** Go through the GitLab sign-in and return the session cookie. */
 async function signIn(returnTo = "/"): Promise<string> {
@@ -117,10 +138,20 @@ describe("gitmap service", () => {
     expect((await get("/auth/callback?code=good&state=forged")).status).toBe(400);
   });
 
+  it("shows download progress first, then the map", async () => {
+    const cookie = await signIn();
+    const first = await get("/team/api/-/merge_requests/42", cookie);
+    const page = await first.text();
+    expect(page).toContain("Download the code");
+    expect(page).toContain("/api/team/api/-/merge_requests/42/status");
+    const { html } = await openMap(cookie);
+    expect(html).toContain('class="card in"');
+  });
+
   it("opens the MR as a map with its title, approve button and comments", async () => {
     const cookie = await signIn();
-    const r = await get("/team/api/-/merge_requests/42", cookie);
-    const html = await r.text();
+    const r = await openMap(cookie);
+    const html = r.html;
 
     expect(r.status).toBe(200);
     expect(html).toContain("!42 · Trim emails on login");
@@ -181,6 +212,18 @@ describe("gitmap service", () => {
     expect(r.headers.get("location")).toBe("/team/api/-/merge_requests/42");
     expect(parseMergeRequestLink("group/sub/proj/-/merge_requests/7")).toEqual({ projectPath: "group/sub/proj", iid: 7 });
     expect(parseMergeRequestLink("https://gitlab.test/team/api")).toBeNull();
+  });
+
+  it("remembers what each user marked as viewed", async () => {
+    const cookie = await signIn();
+    const api = "/api/team/api/-/merge_requests/42/viewed";
+    const r = await postJson(api, cookie, { symbolId: "src/auth.ts#login", viewed: true });
+    expect(await r.json()).toEqual({ viewed: ["src/auth.ts#login"] });
+
+    // A new sign-in (another browser) sees the same marks.
+    const { html } = await openMap(await signIn());
+    expect(html).toContain('"viewed":["src/auth.ts#login"]');
+    expect((await postJson(api, cookie, { symbolId: 5 })).status).toBe(400);
   });
 
   it("signs out", async () => {

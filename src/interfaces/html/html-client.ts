@@ -224,12 +224,23 @@ export const CLIENT_SCRIPT = `
   });
 
   // ── viewed progress (kept in this browser only) ──
+  // On the GitLab service the marks are saved on the server, per user; in a
+  // standalone report they stay in this browser.
   function loadViewed() {
+    if (D.mr) return D.mr.viewed.reduce(function (o, id) { o[id] = true; return o; }, {});
     try { return JSON.parse(localStorage.getItem(D.key) || '[]').reduce(function (o, id) { o[id] = true; return o; }, {}); }
     catch (err) { return {}; }
   }
-  function saveViewed() {
+  function saveViewed(id, on) {
+    if (D.mr) {
+      return fetch(D.mr.apiBase + '/viewed', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbolId: id, viewed: on })
+      }).then(function (r) { if (!r.ok) throw new Error('save failed'); });
+    }
     try { localStorage.setItem(D.key, JSON.stringify(Object.keys(viewed))); } catch (err) { /* private mode */ }
+    return Promise.resolve();
   }
   function updateViewed() {
     var n = syms.filter(function (sy) { return viewed[sy.id]; }).length;
@@ -312,8 +323,16 @@ export const CLIENT_SCRIPT = `
     vb.type = 'button';
     vb.setAttribute('aria-pressed', String(isV));
     vb.addEventListener('click', function () {
-      if (viewed[sy.id]) delete viewed[sy.id]; else viewed[sy.id] = true;
-      saveViewed(); updateViewed(); renderDetail();
+      var on = !viewed[sy.id];
+      if (on) viewed[sy.id] = true; else delete viewed[sy.id];
+      updateViewed(); renderDetail();
+      saveViewed(sy.id, on).catch(function () {
+        // Put it back and say so if the server could not save it.
+        if (on) delete viewed[sy.id]; else viewed[sy.id] = true;
+        updateViewed(); renderDetail();
+        var b = document.querySelector('#dt .btn');
+        if (b) b.textContent = 'Could not save. Try again';
+      });
     });
     var sm = h('button', 'btn', 'Show in map');
     sm.type = 'button';

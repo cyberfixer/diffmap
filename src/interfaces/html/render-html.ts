@@ -21,6 +21,7 @@ export interface MrPage {
   approvals: Approvals;
   user: Person;
   apiBase: string; // e.g. "/api/team/api/-/merge_requests/42"
+  viewed: string[]; // ids of symbols this user marked as viewed
 }
 
 export interface RenderOptions {
@@ -375,6 +376,7 @@ export function renderHtml(
           user: mrPage.user,
           approvals: mrPage.approvals,
           discussions: mrPage.discussions,
+          viewed: mrPage.viewed,
         }
       : null,
   };

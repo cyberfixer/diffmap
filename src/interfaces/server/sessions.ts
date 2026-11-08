@@ -19,8 +19,8 @@ const IDLE_MS = 7 * 24 * 3600 * 1000; // forget sessions unused for a week
 const PENDING_MS = 10 * 60 * 1000; // a sign-in must finish within 10 minutes
 
 /**
- * Sessions live in memory: a restart signs everyone out, which only means
- * clicking through GitLab's sign-in again.
+ * Signed-in users, kept in memory on purpose: restarting the service signs
+ * everyone out, and GitLab tokens are never written to disk.
  */
 export class SessionStore {
   private sessions = new Map<string, Session>();

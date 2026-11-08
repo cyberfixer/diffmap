@@ -5,6 +5,8 @@ export interface ServerConfig {
   publicUrl: string; // where this service is reached, e.g. https://map.company.com
   port: number;
   cacheDir: string; // where project git copies are kept
+  dataDir: string; // "viewed" marks (and the repo cache by default)
+  analysisWorkers: number; // analyses that may run at the same time
 }
 
 /** Read settings from environment variables; throws with a clear list of what is missing. */
@@ -17,6 +19,8 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ServerConfi
     clientSecret: env.GITLAB_CLIENT_SECRET!,
     publicUrl: env.PUBLIC_URL!.replace(/\/$/, ""),
     port: Number(env.PORT ?? 8080),
-    cacheDir: env.CACHE_DIR ?? "/data/repos",
+    dataDir: env.DATA_DIR ?? "/data",
+    cacheDir: env.CACHE_DIR ?? `${env.DATA_DIR ?? "/data"}/repos`,
+    analysisWorkers: Math.max(1, Number(env.ANALYSIS_WORKERS ?? 2) || 2),
   };
 }

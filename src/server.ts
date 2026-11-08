@@ -1,13 +1,10 @@
-import { AnalyzeRangeUseCase } from "./application/use-cases/analyze-range.js";
 import { ReviewMergeRequestUseCase } from "./application/use-cases/review-merge-request.js";
-import { GitDiffReader } from "./infrastructure/git/git-diff-reader.js";
-import { GitSourceReader } from "./infrastructure/git/git-source-reader.js";
 import { GitLabClient } from "./infrastructure/gitlab/gitlab-client.js";
 import { GitLabOAuth } from "./infrastructure/gitlab/gitlab-oauth.js";
 import { GitRepoCache } from "./infrastructure/gitlab/git-repo-cache.js";
 import { TsHighlighter } from "./infrastructure/parsers/typescript/ts-highlighter.js";
-import { TsMorphAdapter } from "./infrastructure/parsers/typescript/ts-morph.adapter.js";
-import { TsMorphCallGraph } from "./infrastructure/parsers/typescript/ts-morph-call-graph.js";
+import { FileViewedStore } from "./infrastructure/storage/file-viewed-store.js";
+import { WorkerAnalyzer } from "./infrastructure/worker/worker-analyzer.js";
 import { configFromEnv } from "./interfaces/server/config.js";
 import { createApp } from "./interfaces/server/server.js";
 import { SessionStore } from "./interfaces/server/sessions.js";
@@ -21,7 +18,9 @@ try {
   process.exit(1);
 }
 
+// Sign-ins are kept in memory: a restart signs everyone out.
 const sessions = new SessionStore();
+const analyzer = new WorkerAnalyzer(config.analysisWorkers);
 setInterval(() => sessions.sweep(), 3600_000).unref();
 
 const app = createApp({
@@ -35,13 +34,9 @@ const app = createApp({
   }),
   hostFor: (token) => new GitLabClient(config.gitlabUrl, token),
   review: new ReviewMergeRequestUseCase(new GitRepoCache(config.cacheDir), (gitDir, base, head) =>
-    new AnalyzeRangeUseCase(
-      new GitDiffReader(gitDir),
-      new GitSourceReader(gitDir),
-      [new TsMorphAdapter()],
-      [new TsMorphCallGraph()],
-    ).execute(base, head),
+    analyzer.analyze(gitDir, base, head),
   ),
+  viewed: new FileViewedStore(`${config.dataDir}/viewed.json`),
   highlighters: [new TsHighlighter()],
 });
 

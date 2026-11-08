@@ -1,4 +1,5 @@
 import type { Person } from "../../application/ports/merge-request.port.js";
+import type { PreparingStatus } from "../../application/use-cases/review-merge-request.js";
 
 const esc = (s: string): string =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -70,4 +71,87 @@ export function homePage(user: Person, gitlabUrl: string, error = ""): string {
 
 export function errorPage(title: string, message: string, back = "/"): string {
   return shell(`${title} · gitmap`, `<h1>${esc(title)}</h1><p>${esc(message)}</p><a class="btn" href="${esc(back)}">Back</a>`);
+}
+
+/**
+ * Shown while an MR's code downloads and is analysed. It asks the server for
+ * progress about once a second and reloads into the map when it is ready.
+ */
+export function loadingPage(title: string, statusUrl: string, status: PreparingStatus): string {
+  return shell(
+    `${title} · gitmap`,
+    `<style>
+  .steps { list-style:none; padding:0; margin:20px 0 16px; display:flex; flex-direction:column; gap:10px; }
+  .steps li { display:flex; align-items:center; gap:10px; color:var(--muted); }
+  .steps li::before { content:""; width:12px; height:12px; border-radius:999px; border:2px solid var(--line-strong); flex:none; }
+  .steps li.on { color:var(--fg); font-weight:500; }
+  .steps li.on::before { border-color:var(--accent); background:var(--accent); animation:pulse 1.2s infinite; }
+  .steps li.done::before { border-color:var(--accent); background:var(--accent); }
+  @keyframes pulse { 50% { opacity:.4; } }
+  .track { height:8px; border-radius:999px; background:var(--line); overflow:hidden; position:relative; }
+  .fill { height:8px; width:0; background:var(--accent); transition:width .4s; }
+  .fill.unknown { width:30%; position:absolute; animation:slide 1.4s ease-in-out infinite; }
+  @keyframes slide { from { left:-30%; } to { left:100%; } }
+  .detail { display:flex; justify-content:space-between; gap:12px; margin-top:8px; font-size:13px; color:var(--muted); }
+  #err { display:none; }
+</style>
+<h1>${esc(title)}</h1>
+<p>Getting this merge request ready. Big projects take longer the first time; after that only new commits are fetched.</p>
+<ol class="steps">
+  <li id="s1">Download the code</li>
+  <li id="s2">Analyse the changes</li>
+  <li id="s3">Open the map</li>
+</ol>
+<div class="track" role="progressbar" aria-label="Progress" id="bar"><div class="fill unknown" id="fill"></div></div>
+<div class="detail"><span id="step" aria-live="polite">${esc(status.step)}</span><span id="time"></span></div>
+<div class="detail"><span id="more">${esc(status.detail)}</span></div>
+<div id="err"><p class="err" id="errmsg" style="margin:16px 0 0"></p><button class="btn" type="button" onclick="location.reload()">Try again</button></div>
+<script>
+(function () {
+  var url = ${JSON.stringify(statusUrl).replace(/</g, "\\u003c")};
+  var started = ${status.startedAt};
+  function $(id) { return document.getElementById(id); }
+  function show(s) {
+    var at = s.state === 'downloading' ? 1 : s.state === 'analysing' ? 2 : 3;
+    [1, 2, 3].forEach(function (i) {
+      $('s' + i).className = i < at ? 'done' : i === at ? 'on' : '';
+    });
+    $('step').textContent = s.step;
+    $('more').textContent = s.detail || '';
+    var f = $('fill');
+    if (typeof s.percent === 'number') {
+      f.className = 'fill'; f.style.width = s.percent + '%';
+      $('bar').setAttribute('aria-valuenow', s.percent);
+    } else {
+      f.className = 'fill unknown'; f.style.width = '';
+      $('bar').removeAttribute('aria-valuenow');
+    }
+    if (s.startedAt) started = s.startedAt;
+  }
+  function tick() {
+    var sec = Math.max(0, Math.round((Date.now() - started) / 1000));
+    $('time').textContent = sec < 60 ? sec + ' s' : Math.floor(sec / 60) + ' min ' + (sec % 60) + ' s';
+  }
+  function poll() {
+    fetch(url, { credentials: 'same-origin' }).then(function (r) {
+      if (r.status === 401) { location.reload(); return null; }
+      return r.json();
+    }).then(function (s) {
+      if (!s) return;
+      if (s.error && !s.state) throw new Error(s.error);
+      show(s);
+      if (s.state === 'ready') { location.reload(); return; }
+      if (s.state === 'error') throw new Error(s.error || 'Something went wrong.');
+      setTimeout(poll, 900);
+    }).catch(function (e) {
+      $('errmsg').textContent = 'Could not get the merge request ready: ' + e.message;
+      $('err').style.display = 'block';
+    });
+  }
+  show(${JSON.stringify(status).replace(/</g, "\\u003c")});
+  setInterval(tick, 1000); tick();
+  setTimeout(poll, 600);
+})();
+</script>`
+  );
 }

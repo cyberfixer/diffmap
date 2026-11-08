@@ -74,8 +74,21 @@ export interface MergeRequestHostPort {
   unapprove(mr: MergeRequestInfo): Promise<Approvals>;
 }
 
+/** Progress of a long step, for showing to the user. */
+export interface Progress {
+  step: string; // e.g. "Downloading code (first time for this project)"
+  percent: number | null; // 0-100 when known
+  detail: string; // e.g. "Receiving objects 45% · 12.3 MiB"
+}
+
 /** Keeps a local git copy of a project so the existing git-based analysis can run on it. */
 export interface RepoCachePort {
   /** Make sure the MR's base and head commits are available; returns the git directory. */
-  prepare(mr: MergeRequestInfo, token: string): Promise<string>;
+  prepare(mr: MergeRequestInfo, token: string, onProgress?: (p: Progress) => void): Promise<string>;
+}
+
+/** Remembers which changed symbols each user marked as viewed in a merge request. */
+export interface ReviewProgressPort {
+  getViewed(user: string, projectPath: string, iid: number): Promise<string[]>;
+  setViewed(user: string, projectPath: string, iid: number, symbolId: string, viewed: boolean): Promise<string[]>;
 }

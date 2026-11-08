@@ -9,14 +9,25 @@ import {
 } from "../ports/merge-request.port.js";
 import type { AnalysisResult } from "../../domain/analysis-result.js";
 
-/** Runs the existing analysis on a local git directory. */
-export type Analyze = (gitDir: string, base: string, head: string) => AnalysisResult;
+/** Runs the existing analysis on a local git directory (in a worker thread in production). */
+export type Analyze = (gitDir: string, base: string, head: string) => Promise<AnalysisResult> | AnalysisResult;
 
 export interface MergeRequestReview {
+  ready: true;
   mr: MergeRequestInfo;
   result: AnalysisResult;
   discussions: ReviewDiscussion[];
   approvals: Approvals;
+}
+
+/** How far along getting an MR ready is, for the progress screen. */
+export interface PreparingStatus {
+  state: "downloading" | "analysing" | "ready" | "error";
+  step: string;
+  percent: number | null;
+  detail: string;
+  error?: string;
+  startedAt: number;
 }
 
 export interface CommentRequest {
@@ -28,40 +39,97 @@ export interface CommentRequest {
   general?: boolean;
 }
 
+interface Job {
+  status: PreparingStatus;
+  promise: Promise<AnalysisResult>;
+}
+
 const MAX_CACHED = 20;
+const keyOf = (mr: MergeRequestInfo) => `${mr.projectPath}@${mr.diffRefs.baseSha}..${mr.diffRefs.headSha}`;
 
 /**
  * Review a merge request: fetch its code, run the analysis, and read or write
- * comments and approvals. Analyses are cached per base..head, because they
+ * comments and approvals. Getting an MR ready runs as a background job whose
+ * progress the page can show; results are cached per base..head, because they
  * only change when new commits are pushed.
  */
 export class ReviewMergeRequestUseCase {
+  private jobs = new Map<string, Job>();
+
   constructor(
     private readonly repos: RepoCachePort,
     private readonly analyze: Analyze,
     private readonly cache = new Map<string, AnalysisResult>(),
   ) {}
 
-  async open(host: MergeRequestHostPort, token: string, projectPath: string, iid: number): Promise<MergeRequestReview> {
+  /**
+   * Open an MR. If its analysis is not ready yet, start it and return its
+   * progress (or wait for it, with `wait`).
+   */
+  async open(
+    host: MergeRequestHostPort,
+    token: string,
+    projectPath: string,
+    iid: number,
+    opts: { wait?: boolean } = {},
+  ): Promise<MergeRequestReview | { ready: false; mr: MergeRequestInfo; status: PreparingStatus }> {
     // Read the MR first: this also checks the user may see the project.
     const mr = await host.getMergeRequest(projectPath, iid);
-    const [result, discussions, approvals] = await Promise.all([
-      this.analysis(mr, token),
+    let result = this.cache.get(keyOf(mr));
+    if (!result) {
+      const job = this.start(mr, token);
+      if (!opts.wait) return { ready: false, mr, status: job.status };
+      result = await job.promise;
+    }
+    const [discussions, approvals] = await Promise.all([
       host.listDiscussions(mr.projectPath, iid),
       host.getApprovals(mr.projectPath, iid),
     ]);
-    return { mr, result, discussions, approvals };
+    return { ready: true, mr, result, discussions, approvals };
   }
 
-  private async analysis(mr: MergeRequestInfo, token: string): Promise<AnalysisResult> {
-    const key = `${mr.projectPath}@${mr.diffRefs.baseSha}..${mr.diffRefs.headSha}`;
-    const hit = this.cache.get(key);
-    if (hit) return hit;
-    const gitDir = await this.repos.prepare(mr, token);
-    const result = this.analyze(gitDir, mr.diffRefs.baseSha, mr.diffRefs.headSha);
-    this.cache.set(key, result);
-    if (this.cache.size > MAX_CACHED) this.cache.delete(this.cache.keys().next().value!);
-    return result;
+  /** Progress of getting an MR ready; starts (or retries) the work if needed. */
+  async progress(host: MergeRequestHostPort, token: string, projectPath: string, iid: number): Promise<PreparingStatus> {
+    const mr = await host.getMergeRequest(projectPath, iid);
+    if (this.cache.has(keyOf(mr))) return { state: "ready", step: "Ready", percent: 100, detail: "", startedAt: Date.now() };
+    const job = this.start(mr, token);
+    // Report a failure once, then forget it so the next visit tries again.
+    if (job.status.state === "error") this.jobs.delete(keyOf(mr));
+    return { ...job.status };
+  }
+
+  private start(mr: MergeRequestInfo, token: string): Job {
+    const key = keyOf(mr);
+    const existing = this.jobs.get(key);
+    if (existing) return existing;
+
+    const status: PreparingStatus = { state: "downloading", step: "Getting the code", percent: null, detail: "", startedAt: Date.now() };
+    const promise = (async () => {
+      const gitDir = await this.repos.prepare(mr, token, (p) => {
+        status.step = p.step;
+        status.percent = p.percent;
+        status.detail = p.detail;
+      });
+      Object.assign(status, {
+        state: "analysing",
+        step: "Analysing the changes",
+        percent: null,
+        detail: "Finding changed functions and who calls them",
+      });
+      const result = await this.analyze(gitDir, mr.diffRefs.baseSha, mr.diffRefs.headSha);
+      this.cache.set(key, result);
+      if (this.cache.size > MAX_CACHED) this.cache.delete(this.cache.keys().next().value!);
+      Object.assign(status, { state: "ready", step: "Ready", percent: 100, detail: "" });
+      this.jobs.delete(key);
+      return result;
+    })();
+    promise.catch((err: unknown) => {
+      status.state = "error";
+      status.error = err instanceof Error ? err.message : String(err);
+    });
+    const job = { status, promise };
+    this.jobs.set(key, job);
+    return job;
   }
 
   /**

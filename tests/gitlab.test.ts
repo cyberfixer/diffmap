@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { GitLabClient } from "../src/infrastructure/gitlab/gitlab-client.js";
 import { GitLabOAuth, pkcePair } from "../src/infrastructure/gitlab/gitlab-oauth.js";
-import { GitRepoCache } from "../src/infrastructure/gitlab/git-repo-cache.js";
+import { GitRepoCache, parseGitProgress } from "../src/infrastructure/gitlab/git-repo-cache.js";
 import { ReviewMergeRequestUseCase, quoteLine } from "../src/application/use-cases/review-merge-request.js";
 import {
   PositionRejectedError,
@@ -207,9 +207,11 @@ describe("GitRepoCache", () => {
       diffRefs: { baseSha: base, headSha: head, startSha: base }, cloneUrl: remote.dir,
     };
     const cache = new GitRepoCache(cacheDir);
-    const dir = await cache.prepare(mr, "tok");
+    const steps: string[] = [];
+    const dir = await cache.prepare(mr, "tok", (p) => steps.push(p.step));
 
     expect(dir).toBe(join(cacheDir, "team_api.git"));
+    expect(steps).toContain("Downloading the code (first time for this project)");
     // Second call is a no-op because both commits are present.
     expect(await cache.prepare(mr, "tok")).toBe(dir);
   });
@@ -244,9 +246,48 @@ describe("ReviewMergeRequestUseCase", () => {
       () => (runs++, { base: "b", head: "h", symbols: [], nodes: [], edges: [], files: [] }),
     );
     const { host } = fakeHost();
-    await uc.open(host, "t", "team/api", 42);
-    await uc.open(host, "t", "team/api", 42);
+    expect((await uc.open(host, "t", "team/api", 42, { wait: true })).ready).toBe(true);
+    expect((await uc.open(host, "t", "team/api", 42)).ready).toBe(true);
     expect(runs).toBe(1);
+  });
+
+  it("reports progress while the code downloads, then ready", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const uc = new ReviewMergeRequestUseCase(
+      {
+        prepare: async (_mr, _t, onProgress) => {
+          onProgress?.({ step: "Downloading the code (first time for this project)", percent: 40, detail: "Receiving objects 50%" });
+          await gate;
+          return "/repo";
+        },
+      },
+      async () => ({ base: "b", head: "h", symbols: [], nodes: [], edges: [], files: [] }),
+    );
+    const { host } = fakeHost();
+
+    const first = await uc.open(host, "t", "team/api", 42);
+    expect(first.ready).toBe(false);
+    const p = await uc.progress(host, "t", "team/api", 42);
+    expect(p).toMatchObject({ state: "downloading", percent: 40, detail: "Receiving objects 50%" });
+
+    release();
+    await new Promise((r) => setTimeout(r, 10));
+    expect((await uc.progress(host, "t", "team/api", 42)).state).toBe("ready");
+  });
+
+  it("reports a failure once, then tries again", async () => {
+    let attempts = 0;
+    const uc = new ReviewMergeRequestUseCase(
+      { prepare: async () => { attempts++; throw new Error("GitLab is down"); } },
+      () => { throw new Error(); },
+    );
+    const { host } = fakeHost();
+    await uc.open(host, "t", "team/api", 42);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(await uc.progress(host, "t", "team/api", 42)).toMatchObject({ state: "error", error: "GitLab is down" });
+    await uc.progress(host, "t", "team/api", 42);
+    expect(attempts).toBe(2);
   });
 
   it("falls back to a general comment that quotes the line", async () => {
@@ -258,5 +299,16 @@ describe("ReviewMergeRequestUseCase", () => {
     expect(r.fallback).toBe(true);
     expect(created).toEqual([{ body: quoteLine(position, "new SessionStore(db)", "Needs the ttl") }]);
     expect(quoteLine(position, "x", "y")).toBe("**`src/app.ts:12`**\n```\nx\n```\n\ny");
+  });
+});
+
+describe("parseGitProgress", () => {
+  it("turns git's progress lines into a percentage and a short detail", () => {
+    expect(parseGitProgress("Receiving objects:  50% (500/1000), 12.30 MiB | 3.10 MiB/s")).toEqual({
+      percent: 50,
+      detail: "Receiving objects 50% · 12.30 MiB",
+    });
+    expect(parseGitProgress("Resolving deltas: 100% (20/20), done.")).toEqual({ percent: 100, detail: "Resolving deltas 100%" });
+    expect(parseGitProgress("remote: Enumerating objects: 5, done.")).toBeNull();
   });
 });

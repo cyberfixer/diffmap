@@ -3,13 +3,14 @@ import {
   HostError,
   type LinePosition,
   type MergeRequestHostPort,
+  type ReviewProgressPort,
 } from "../../application/ports/merge-request.port.js";
 import type { ReviewMergeRequestUseCase } from "../../application/use-cases/review-merge-request.js";
 import type { SyntaxHighlighterPort } from "../../application/ports/syntax-highlighter.port.js";
 import { pkcePair, type OAuthTokens } from "../../infrastructure/gitlab/gitlab-oauth.js";
 import { renderHtml } from "../html/render-html.js";
 import type { ServerConfig } from "./config.js";
-import { errorPage, homePage, signInPage } from "./pages.js";
+import { errorPage, homePage, loadingPage, signInPage } from "./pages.js";
 import { SessionStore, type Session } from "./sessions.js";
 
 export interface OAuthPort {
@@ -24,6 +25,8 @@ export interface AppDeps {
   /** A code-host client acting with the given (refreshing) token. */
   hostFor: (token: () => Promise<string>) => MergeRequestHostPort;
   review: ReviewMergeRequestUseCase;
+  /** Where each user's "viewed" marks are kept. */
+  viewed: ReviewProgressPort;
   highlighters?: SyntaxHighlighterPort[];
   sessions?: SessionStore;
   log?: (msg: string) => void;
@@ -31,7 +34,7 @@ export interface AppDeps {
 
 const COOKIE = "gitmap_session";
 const MR_PAGE = /^\/(.+?)\/-\/merge_requests\/(\d+)\/?$/;
-const MR_API = /^\/api\/(.+?)\/-\/merge_requests\/(\d+)\/(discussions|approve|unapprove|discussions\/([^/]+)\/notes)$/;
+const MR_API = /^\/api\/(.+?)\/-\/merge_requests\/(\d+)\/(discussions|approve|unapprove|viewed|status|discussions\/([^/]+)\/notes)$/;
 const MAX_BODY = 64 * 1024;
 
 class HttpError extends Error {
@@ -189,12 +192,25 @@ export function createApp(deps: AppDeps): Server {
     }
 
     const api = path.match(MR_API);
-    if (api && method === "POST") {
+    if (api && method === "GET" && api[3] === "status") {
+      if (!session) return json(res, 401, { error: "Not signed in." });
+      const token = tokenFor(session);
+      return json(res, 200, await deps.review.progress(deps.hostFor(token), await token(), decodePath(api[1]), Number(api[2])));
+    }
+    if (api && method === "POST" && api[3] !== "status") {
       if (!session) return json(res, 401, { error: "Not signed in." });
       const projectPath = decodePath(api[1]);
       const iid = Number(api[2]);
       const host = deps.hostFor(tokenFor(session));
       const body = await readJson(req);
+      if (api[3] === "viewed") {
+        if (typeof body.symbolId !== "string" || !body.symbolId || typeof body.viewed !== "boolean") {
+          throw new HttpError(400, "Expected { symbolId, viewed }.");
+        }
+        const mr = await host.getMergeRequest(projectPath, iid); // checks access, gives the canonical path
+        const viewed = await deps.viewed.setViewed(session.user.username, mr.projectPath, iid, body.symbolId, body.viewed);
+        return json(res, 200, { viewed });
+      }
       if (api[3] === "approve" || api[3] === "unapprove") {
         return json(res, 200, await deps.review.setApproval(host, projectPath, iid, api[3] === "approve"));
       }
@@ -215,16 +231,22 @@ export function createApp(deps: AppDeps): Server {
       if (!session) return redirect(res, loginUrl(path));
       const projectPath = decodePath(page[1]);
       const iid = Number(page[2]);
-      const started = Date.now();
-      const review = await deps.review.open(deps.hostFor(tokenFor(session)), await tokenFor(session)(), projectPath, iid);
-      log(`map: ${review.mr.projectPath}!${iid} for @${session.user.username} in ${Date.now() - started} ms`);
+      const token = tokenFor(session);
+      const review = await deps.review.open(deps.hostFor(token), await token(), projectPath, iid);
+      const apiBase = `/api/${encodePath(review.mr.projectPath)}/-/merge_requests/${iid}`;
+      if (!review.ready) {
+        // Show the download/analysis progress; the page reloads itself when ready.
+        return send(res, 200, loadingPage(`!${iid} · ${review.mr.title}`, `${apiBase}/status`, review.status));
+      }
+      log(`map: ${review.mr.projectPath}!${iid} for @${session.user.username}`);
       const html = renderHtml(review.result, deps.highlighters ?? [], {
         mr: {
           mr: review.mr,
           discussions: review.discussions,
           approvals: review.approvals,
           user: session.user,
-          apiBase: `/api/${encodePath(review.mr.projectPath)}/-/merge_requests/${iid}`,
+          apiBase,
+          viewed: await deps.viewed.getViewed(session.user.username, review.mr.projectPath, iid),
         },
       });
       return send(res, 200, html);

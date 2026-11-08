@@ -98,7 +98,9 @@ docker run -d --name gitmap -p 8080:8080 -v gitmap-data:/data \
 | `GITLAB_CLIENT_SECRET` | Secret from step 1 |
 | `PUBLIC_URL` | Address people use to open gitmap (must match the redirect URI) |
 | `PORT` | Port inside the container (default `8080`) |
-| `CACHE_DIR` | Where project code is kept (default `/data/repos`, keep it on a volume) |
+| `DATA_DIR` | Where gitmap keeps its files (default `/data`, keep it on a volume) |
+| `CACHE_DIR` | Where project code is kept (default `$DATA_DIR/repos`) |
+| `ANALYSIS_WORKERS` | How many merge requests can be analysed at the same time (default `2`) |
 | `NODE_EXTRA_CA_CERTS`, `GIT_SSL_CAINFO` | Path to your CA file if GitLab uses an internal certificate |
 
 Check it's running: `curl http://localhost:8080/healthz` prints `ok`.
@@ -110,7 +112,9 @@ Check it's running: `curl http://localhost:8080/healthz` prints `ok`.
   `https://gitmap.company.com/team/api/-/merge_requests/42`
 - Or open gitmap's start page and paste the MR link.
 
-The first time, you are sent to GitLab to sign in.
+The first time, you are sent to GitLab to sign in. If the MR's code isn't
+ready yet, you see a progress screen (download, then analysis) that opens the
+map by itself when it's done.
 
 On the map:
 
@@ -120,13 +124,17 @@ On the map:
   comment there.
 - Existing comments show under their lines. Click **Reply** to answer.
 - **Approve** / **Revoke approval** in the top bar works like GitLab's button.
-- **Mark as viewed** tracks your own progress (saved in your browser only).
+- **Mark as viewed** tracks your own progress. It is saved on the server for your
+  GitLab user, so it is still there after closing the browser or on another computer.
 
 Good to know:
 
 - The first open of a project downloads its code, which can take a while for big
   repos. After that only new commits are fetched, and each MR version is analysed once.
-- Sign-ins are kept in memory. Restarting the container means everyone signs in again.
+- Analysis runs in background threads, so one big MR does not slow down the pages
+  of other people.
+- Sign-ins are kept in memory on purpose: restarting the container signs everyone
+  out, and GitLab tokens are never written to disk.
 - Run it behind HTTPS (a reverse proxy) in real use, and set `PUBLIC_URL` to the
   `https://` address.
 
