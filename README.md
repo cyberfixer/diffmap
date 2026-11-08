@@ -7,9 +7,11 @@ focused on the change, so reviewers don't get lost.
 
 There are two ways to use it:
 
-- **Command line:** make a review page for any two branches or commits in a local repo.
-- **GitLab service (Docker):** open any merge request as a map, comment on lines,
-  approve, and track what you have viewed. Works with self-hosted GitLab and gitlab.com.
+1. **[Command line](#1-command-line)**: make a review page for any two branches or
+   commits in a repo on your machine. The quickest way to try it.
+2. **[GitLab service (Docker)](#2-gitlab-service-docker)**: open any merge request as
+   a map, comment on lines, approve, and track what you have viewed. Works with
+   self-hosted GitLab and gitlab.com.
 
 ## Languages
 
@@ -27,22 +29,44 @@ The page header always says which applies: *Calls: exact* or *Calls: matched by 
 
 ---
 
-## Quick start
+## 1. Command line
+
+### Install (once)
 
 You need Node.js 20 or newer and git.
 
 ```bash
+git clone https://github.com/cyberfixer/diffmap.git
+cd diffmap
 npm install
 npm run build
-cd /path/to/your/repo
-node /path/to/gitmap/bin/git-map.js main --format html > report.html
+npm link        # makes the `git-map` command available everywhere
 ```
 
-Open `report.html` in your browser.
+`npm link` puts `git-map` on your PATH, pointing at this folder. After pulling
+new changes, run `npm run build` again; no need to link again. To remove it:
+`npm unlink -g gitmap`.
 
----
+### Use
 
-## 1. Command line
+Go to any git repository and run:
+
+```bash
+cd /path/to/your/repo
+git-map main --format html > report.html
+```
+
+Open `report.html` in your browser. More examples:
+
+```bash
+git-map main --format html > report.html              # your branch vs main
+git-map main..feature/login --format html > r.html     # another branch vs main
+git-map HEAD~1 --format html > last.html               # just the last commit
+git-map main --scip index.scip --format html > r.html  # with exact calls
+git-map main > result.json                             # raw data instead of a page
+```
+
+### Options
 
 ```
 git-map <base>[..<head>] [--format json|html] [--depth N] [--scip FILE]...
@@ -56,16 +80,11 @@ git-map <base>[..<head>] [--format json|html] [--depth N] [--scip FILE]...
 | `--depth` | Levels of callers and callees to include | `1` |
 | `--scip` | A SCIP index for exact calls (see [Exact calls](#exact-calls-from-ci)); can be repeated | none |
 
-```bash
-git-map main --format html > report.html            # your branch vs main
-git-map main..feature/login --format html > r.html   # another branch vs main
-git-map HEAD~1 --format html > last.html             # just the last commit
-git-map main --scip index.scip --format html > r.html  # with exact calls
-```
+<details>
+<summary>Without npm link</summary>
 
-To type `git-map` from any folder, run `npm link` once in the gitmap folder.
-
----
+Run the script directly: `node /path/to/diffmap/bin/git-map.js main --format html > report.html`
+</details>
 
 ## 2. GitLab service (Docker)
 
@@ -89,6 +108,8 @@ straight to GitLab.
 Save it and copy the **Application ID** and **Secret**.
 
 ### Step 2: run it
+
+In the `diffmap` folder (clone it as in [Install](#install-once) if you haven't):
 
 ```bash
 cp .env.example .env     # fill in GITLAB_URL, the ID, the secret and PUBLIC_URL
