@@ -224,12 +224,12 @@ sequenceDiagram
 | Part | File | What it does |
 |---|---|---|
 | Settings | [server/config.ts](src/interfaces/server/config.ts) | Reads `GITLAB_URL`, client id/secret, `PUBLIC_URL`, folders, worker count, index job name. |
-| Sign-in | [gitlab/gitlab-oauth.ts](src/infrastructure/gitlab/gitlab-oauth.ts), [server/sessions.ts](src/interfaces/server/sessions.ts) | "Sign in with GitLab" (authorization code + PKCE + one-time state). Sessions and tokens are kept **in memory only**: a restart signs everyone out. Tokens refresh shortly before they expire. |
+| Sign-in | [gitlab/gitlab-oauth.ts](src/infrastructure/gitlab/gitlab-oauth.ts), [server/sessions.ts](src/interfaces/server/sessions.ts) | **Full mode:** "Sign in with GitLab" (authorization code + PKCE + one-time state); tokens refresh shortly before they expire. **View-only mode** (no client ID/secret configured): each person pastes their own access token at `/auth/token`; diffmap checks it and its scopes with GitLab. Either way, sessions and tokens are kept **in memory only**: a restart signs everyone out. |
 | GitLab API | [gitlab/gitlab-client.ts](src/infrastructure/gitlab/gitlab-client.ts) | MR details, discussions, new comments, replies, approvals, and finding the CI index, all **as the signed-in user**. |
 | Code | [gitlab/git-repo-cache.ts](src/infrastructure/gitlab/git-repo-cache.ts) | One bare git repo per project on the data volume. Fetches only the target branch and GitLab's `refs/merge-requests/<iid>/head`, with the user's token. Reports git's progress. |
 | Jobs and cache | [review-merge-request.ts](src/application/use-cases/review-merge-request.ts) | Getting an MR ready runs as a background job with a status the progress screen polls. Results are cached per `project@base..head` (last 20). Without an index, it looks again after a minute in case CI finished. |
 | Worker threads | [worker/](src/infrastructure/worker/) | The analysis is heavy, synchronous work; it runs in worker threads (`ANALYSIS_WORKERS`, default 2) so the server keeps answering everyone else. |
-| Routes | [server/server.ts](src/interfaces/server/server.ts) | Pages, sign-in, the MR page, and the JSON API used by the page (`/api/<project>/-/merge_requests/<iid>/…`: discussions, notes, approve, unapprove, viewed, status). |
+| Routes | [server/server.ts](src/interfaces/server/server.ts) | Pages, sign-in, the MR page, and the JSON API used by the page (`/api/<project>/-/merge_requests/<iid>/…`: discussions, notes, approve, unapprove, viewed, status). In view-only mode the write routes answer 403 and the page has no comment box or Approve button. |
 | Pages | [server/pages.ts](src/interfaces/server/pages.ts) | Sign-in, start page, errors, the progress screen. |
 | Logs | [server/safe-log.ts](src/interfaces/server/safe-log.ts) | Every log line passes through it: no query strings, sign-in codes or tokens are ever written. |
 

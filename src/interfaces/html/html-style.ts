@@ -234,8 +234,8 @@ export const STYLE = `
   .who { display:flex; align-items:center; gap:8px; margin:0; font-size:12px; color:var(--muted); }
   .link { border:0; background:none; padding:0; color:var(--accent); cursor:pointer; font-size:12px; }
   .link:hover { text-decoration:underline; }
-  body.mr .card .dl .lo, body.mr .card .dl .ln { cursor:pointer; }
-  body.mr .card .dl .lo:hover, body.mr .card .dl .ln:hover { background:var(--accent-bg); color:var(--accent); }
+  body.mr-write .card .dl .lo, body.mr-write .card .dl .ln { cursor:pointer; }
+  body.mr-write .card .dl .lo:hover, body.mr-write .card .dl .ln:hover { background:var(--accent-bg); color:var(--accent); }
   .dl.has-c .lo { box-shadow:inset 3px 0 0 var(--accent); }
   .thread, .composer { margin:4px 10px 8px 96px; border:1px solid var(--line-strong); border-radius:8px; background:var(--panel);
                        font:13px/1.45 'IBM Plex Sans', system-ui, sans-serif; color:var(--fg); cursor:auto; }

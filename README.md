@@ -91,11 +91,22 @@ Run the script directly: `node /path/to/diffmap/bin/diffmap.js main --format htm
 
 ## 2. GitLab service (Docker)
 
-People open a merge request and see it as a map. They sign in with GitLab, so
-they only see projects they can already see there. Comments and approvals go
-straight to GitLab.
+People open a merge request and see it as a map. They only ever see projects
+they can already see in GitLab. There are two modes:
+
+| Mode | Setup | People sign in with | Comment & approve |
+|---|---|---|---|
+| **Full** | a GitLab application (ID + secret), [step 1](#step-1-create-an-application-in-gitlab) | "Sign in with GitLab" | ✅ goes straight to GitLab |
+| **View-only** | nothing in GitLab; leave `GITLAB_CLIENT_ID` and `GITLAB_CLIENT_SECRET` out | their own GitLab access token (scopes `read_api`, `read_repository`) | ❌ (existing comments are shown) |
+
+View-only mode is the quickest start: skip step 1. On the sign-in page each
+person follows a link that opens GitLab's token page already filled in, creates
+a token and pastes it. The token stays in diffmap's memory only and is
+forgotten on sign-out.
 
 ### Step 1: create an application in GitLab
+
+*(Full mode only. For view-only mode skip this step.)*
 
 | GitLab | Where |
 |---|---|
@@ -139,8 +150,8 @@ docker run -d --name diffmap -p 8080:8080 -v diffmap-data:/data \
 | Setting | Meaning |
 |---|---|
 | `GITLAB_URL` | Your GitLab, e.g. `https://gitlab.company.com` or `https://gitlab.com` |
-| `GITLAB_CLIENT_ID` | Application ID from step 1 |
-| `GITLAB_CLIENT_SECRET` | Secret from step 1 |
+| `GITLAB_CLIENT_ID` | Application ID from step 1 (leave out for view-only mode) |
+| `GITLAB_CLIENT_SECRET` | Secret from step 1 (leave out for view-only mode) |
 | `PUBLIC_URL` | Address people use to open diffmap (must match the redirect URI) |
 | `PORT` | Port inside the container (default `8080`) |
 | `DATA_DIR` | Where diffmap keeps its files (default `/data`; keep it on a volume) |

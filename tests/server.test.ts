@@ -72,7 +72,7 @@ beforeAll(async () => {
   };
 
   server = createApp({
-    config: { gitlabUrl: "https://gitlab.test", clientId: "c", clientSecret: "s", publicUrl: "http://map.test", port: 0, cacheDir: "" },
+    config: { mode: "full", gitlabUrl: "https://gitlab.test", clientId: "c", clientSecret: "s", publicUrl: "http://map.test", port: 0, cacheDir: "" },
     oauth: {
       authorizeUrl: (state) => `https://gitlab.test/oauth/authorize?state=${state}`,
       exchange: async (code) => {

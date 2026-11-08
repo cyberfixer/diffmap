@@ -26,12 +26,17 @@ setInterval(() => sessions.sweep(), 3600_000).unref();
 const app = createApp({
   config,
   sessions,
-  oauth: new GitLabOAuth({
-    gitlabUrl: config.gitlabUrl,
-    clientId: config.clientId,
-    clientSecret: config.clientSecret,
-    redirectUri: `${config.publicUrl}/auth/callback`,
-  }),
+  // Full mode: "Sign in with GitLab" through the GitLab application. View mode: none
+  // (people sign in with their own read-only token; no comments or approvals).
+  oauth:
+    config.mode === "full"
+      ? new GitLabOAuth({
+          gitlabUrl: config.gitlabUrl,
+          clientId: config.clientId,
+          clientSecret: config.clientSecret,
+          redirectUri: `${config.publicUrl}/auth/callback`,
+        })
+      : undefined,
   hostFor: (token) => new GitLabClient(config.gitlabUrl, token, fetch, { name: config.indexJob, artifact: config.indexArtifact }),
   review: new ReviewMergeRequestUseCase(new GitRepoCache(config.cacheDir), (gitDir, base, head, index) =>
     analyzer.analyze(gitDir, base, head, index),
@@ -41,5 +46,6 @@ const app = createApp({
 });
 
 app.listen(config.port, () => {
-  console.log(`diffmap service on port ${config.port}, signing in with ${config.gitlabUrl}, public at ${config.publicUrl}`);
+  const mode = config.mode === "full" ? "full (GitLab sign-in, comments, approvals)" : "view-only (personal access tokens)";
+  console.log(`diffmap service on port ${config.port}, ${mode}, GitLab ${config.gitlabUrl}, public at ${config.publicUrl}`);
 });

@@ -70,6 +70,8 @@ export type IndexLookup =
   | { state: "none" }; // no such job for this commit
 
 export interface MergeRequestHostPort {
+  /** Optional: the scopes of the token in use, when the host can tell (personal access tokens). */
+  tokenScopes?(): Promise<string[] | null>;
   /** Optional: find the CI-built index for the MR's head commit. */
   findIndex?(mr: MergeRequestInfo): Promise<IndexLookup>;
   currentUser(): Promise<Person>;

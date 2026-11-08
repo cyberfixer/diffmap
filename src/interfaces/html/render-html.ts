@@ -17,6 +17,8 @@ import type {
 
 /** Extra data when the page shows a GitLab merge request (service mode). */
 export interface MrPage {
+  /** View mode: show comments and approvals, but no way to add or change them. */
+  readOnly?: boolean;
   mr: MergeRequestInfo;
   discussions: ReviewDiscussion[];
   approvals: Approvals;
@@ -408,6 +410,7 @@ export function renderHtml(
           approvals: mrPage.approvals,
           discussions: mrPage.discussions,
           viewed: mrPage.viewed,
+          readOnly: !!mrPage.readOnly,
         }
       : null,
   };
@@ -425,7 +428,7 @@ export function renderHtml(
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
 <style>${STYLE}</style>
 </head>
-<body class="show-out${mrPage ? " mr" : ""}">
+<body class="show-out${mrPage ? " mr" : ""}${mrPage && !mrPage.readOnly ? " mr-write" : ""}">
 <header class="top">
   <div class="brand"><svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2.5"></circle><circle cx="19" cy="6" r="2.5"></circle><circle cx="12" cy="18" r="2.5"></circle><path d="M7.5 6h9M6.5 8.2l4.2 7.6M17.5 8.2l-4.2 7.6"></path></svg><span>diffmap</span></div>
   <div class="title"><div class="t">${mrPage ? `<a href="${esc(mrPage.mr.webUrl)}" title="Open in GitLab">${esc(title)}</a>` : esc(title)}</div><div class="s mono">${esc(sub)}</div></div>
@@ -520,7 +523,7 @@ function mrActions(p: MrPage): string {
   return `${approvedNote}
     <span class="pill" id="ccount">${p.discussions.length} comment${p.discussions.length === 1 ? "" : "s"}</span>
     <a class="hbtn" href="${esc(p.mr.webUrl)}">Open in GitLab</a>
-    <button class="hbtn ${a.userHasApproved ? "" : "primary"}" id="approve" type="button" aria-pressed="${a.userHasApproved}"${disabled}>${label}</button>
+    ${p.readOnly ? `<span class="pill" title="This diffmap is view-only: comment and approve in GitLab">View only</span>` : `<button class="hbtn ${a.userHasApproved ? "" : "primary"}" id="approve" type="button" aria-pressed="${a.userHasApproved}"${disabled}>${label}</button>`}
     <form method="post" action="/auth/logout" class="who"><span title="Signed in as @${esc(p.user.username)}">${esc(p.user.name)}</span><button type="submit" class="link">Sign out</button></form>`;
 }
 

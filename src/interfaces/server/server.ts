@@ -22,7 +22,8 @@ export interface OAuthPort {
 
 export interface AppDeps {
   config: ServerConfig;
-  oauth: OAuthPort;
+  /** GitLab application sign-in; absent in view mode (personal tokens instead). */
+  oauth?: OAuthPort;
   /** A code-host client acting with the given (refreshing) token. */
   hostFor: (token: () => Promise<string>) => MergeRequestHostPort;
   review: ReviewMergeRequestUseCase;
@@ -71,6 +72,27 @@ function cookies(req: IncomingMessage): Record<string, string> {
   return out;
 }
 
+/** A small HTML form body (application/x-www-form-urlencoded). */
+async function readForm(req: IncomingMessage): Promise<URLSearchParams> {
+  if (!(req.headers["content-type"] ?? "").startsWith("application/x-www-form-urlencoded")) {
+    throw new HttpError(415, "Expected a form.");
+  }
+  let size = 0;
+  const chunks: Buffer[] = [];
+  for await (const c of req) {
+    size += (c as Buffer).length;
+    if (size > 8 * 1024) throw new HttpError(413, "Too long.");
+    chunks.push(c as Buffer);
+  }
+  return new URLSearchParams(Buffer.concat(chunks).toString("utf8"));
+}
+
+/** Scopes a personal access token needs in view mode (either the read pair, or the broad api scope). */
+function missingScopes(scopes: string[]): string[] {
+  if (scopes.includes("api")) return [];
+  return ["read_api", "read_repository"].filter((s) => !scopes.includes(s));
+}
+
 async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
   if (!(req.headers["content-type"] ?? "").startsWith("application/json")) {
     throw new HttpError(415, "Expected a JSON body.");
@@ -115,7 +137,7 @@ export function createApp(deps: AppDeps): Server {
 
   /** The session's access token, refreshed shortly before it expires. */
   const tokenFor = (s: Session) => async (): Promise<string> => {
-    if (s.tokens.refreshToken && s.tokens.expiresAt - Date.now() < 60_000) {
+    if (deps.oauth && s.tokens.refreshToken && s.tokens.expiresAt - Date.now() < 60_000) {
       let p = refreshing.get(s);
       if (!p) {
         p = deps.oauth.refresh(s.tokens.refreshToken).then((t) => {
@@ -159,13 +181,46 @@ export function createApp(deps: AppDeps): Server {
 
     if (method === "GET" && path === "/healthz") return send(res, 200, "ok", "text/plain");
 
+    const viewOnly = config.mode === "view" || !deps.oauth;
+
+    // ── view mode: sign in with your own personal access token ──
+    if (viewOnly && method === "GET" && (path === "/auth/login" || path === "/auth/callback")) {
+      return send(res, 200, signInPage(config.gitlabUrl, safeReturn(url.searchParams.get("returnTo")), "view"));
+    }
+    if (viewOnly && method === "POST" && path === "/auth/token") {
+      const origin = req.headers.origin;
+      if (origin && origin !== new URL(config.publicUrl).origin) throw new HttpError(403, "Request from another site refused.");
+      const form = await readForm(req);
+      const returnTo = safeReturn(form.get("returnTo"));
+      const token = (form.get("token") ?? "").trim();
+      const retry = (msg: string) => send(res, 400, signInPage(config.gitlabUrl, returnTo, "view", msg));
+      if (!/^[\w.-]{10,200}$/.test(token)) return retry("That doesn't look like a GitLab access token.");
+      const host = deps.hostFor(async () => token);
+      let user;
+      try {
+        user = await host.currentUser();
+      } catch (err) {
+        if (err instanceof HostError && (err.status === 401 || err.status === 403)) {
+          return retry("GitLab did not accept this token. Check that it is not expired or revoked.");
+        }
+        throw err;
+      }
+      const scopes = await host.tokenScopes?.();
+      const missing = scopes ? missingScopes(scopes) : [];
+      if (missing.length) return retry(`This token is missing the scope${missing.length > 1 ? "s" : ""} ${missing.join(" and ")}.`);
+      // Kept in memory only, like OAuth tokens; never refreshed (it is the user's own token).
+      const s = sessions.create(user, { accessToken: token, refreshToken: null, expiresAt: Number.MAX_SAFE_INTEGER });
+      log(`sign-in (view mode): @${user.username}`);
+      return redirect(res, returnTo, { "Set-Cookie": cookie(s.id, 7 * 24 * 3600) });
+    }
+
     // ── sign-in with GitLab ──
-    if (method === "GET" && path === "/auth/login") {
+    if (method === "GET" && path === "/auth/login" && deps.oauth) {
       const { verifier, challenge } = pkcePair();
       const state = sessions.startLogin(verifier, safeReturn(url.searchParams.get("returnTo")));
       return redirect(res, deps.oauth.authorizeUrl(state, challenge));
     }
-    if (method === "GET" && path === "/auth/callback") {
+    if (method === "GET" && path === "/auth/callback" && deps.oauth) {
       if (url.searchParams.get("error")) {
         return send(res, 403, errorPage("Sign-in cancelled", url.searchParams.get("error_description") ?? "GitLab did not sign you in."));
       }
@@ -185,7 +240,7 @@ export function createApp(deps: AppDeps): Server {
 
     // ── pages ──
     if (method === "GET" && path === "/") {
-      return send(res, 200, session ? homePage(session.user, config.gitlabUrl) : signInPage(config.gitlabUrl, "/"));
+      return send(res, 200, session ? homePage(session.user, config.gitlabUrl) : signInPage(config.gitlabUrl, "/", viewOnly ? "view" : "full"));
     }
     if (method === "GET" && path === "/go") {
       if (!session) return redirect(res, loginUrl(path + url.search));
@@ -214,6 +269,7 @@ export function createApp(deps: AppDeps): Server {
         const viewed = await deps.viewed.setViewed(session.user.username, mr.projectPath, iid, body.symbolId, body.viewed);
         return json(res, 200, { viewed });
       }
+      if (viewOnly) throw new HttpError(403, "View-only mode: comments and approvals are turned off.");
       if (api[3] === "approve" || api[3] === "unapprove") {
         return json(res, 200, await deps.review.setApproval(host, projectPath, iid, api[3] === "approve"));
       }
@@ -244,6 +300,7 @@ export function createApp(deps: AppDeps): Server {
       log(`map: ${review.mr.projectPath}!${iid} for @${session.user.username}`);
       const html = renderHtml(review.result, deps.highlighters ?? [], {
         mr: {
+          readOnly: viewOnly,
           mr: review.mr,
           discussions: review.discussions,
           approvals: review.approvals,

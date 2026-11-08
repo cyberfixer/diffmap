@@ -53,12 +53,32 @@ function shell(title: string, body: string): string {
 </html>`;
 }
 
-export function signInPage(gitlabUrl: string, returnTo: string): string {
+export function signInPage(gitlabUrl: string, returnTo: string, mode: "full" | "view" = "full", error = ""): string {
+  if (mode === "full") {
+    return shell(
+      "Sign in · diffmap",
+      `<h1>Review merge requests as a map</h1>
+<p>Sign in with your GitLab account at <code>${esc(gitlabUrl)}</code>. diffmap only sees what you can see in GitLab.</p>
+<a class="btn" href="/auth/login?returnTo=${encodeURIComponent(returnTo)}">Sign in with GitLab</a>`
+    );
+  }
+  // View mode: no GitLab application; each person uses their own read-only token.
+  const create = `${gitlabUrl}/-/user_settings/personal_access_tokens?name=diffmap&scopes=read_api,read_repository`;
   return shell(
     "Sign in · diffmap",
     `<h1>Review merge requests as a map</h1>
-<p>Sign in with your GitLab account at <code>${esc(gitlabUrl)}</code>. diffmap only sees what you can see in GitLab.</p>
-<a class="btn" href="/auth/login?returnTo=${encodeURIComponent(returnTo)}">Sign in with GitLab</a>`
+<p>This diffmap is <b>view-only</b>. Sign in with a GitLab access token of your own; diffmap only sees what you can see in GitLab.</p>
+<ol style="margin:0 0 16px; padding-left:20px; color:var(--muted)">
+  <li><a href="${esc(create)}" target="_blank" rel="noopener">Create a token in GitLab</a> (opens with the right settings: scopes <code>read_api</code> and <code>read_repository</code>).</li>
+  <li>Paste it here. It stays in diffmap's memory only and is forgotten when you sign out.</li>
+</ol>
+<form method="post" action="/auth/token">
+  <input type="hidden" name="returnTo" value="${esc(returnTo)}">
+  <label for="t">GitLab access token</label>
+  <input id="t" name="token" type="password" required autocomplete="off" spellcheck="false" placeholder="glpat-…" autofocus>
+  ${error ? `<p class="err" style="margin:10px 0 0">${esc(error)}</p>` : ""}
+  <button class="btn" type="submit">Sign in</button>
+</form>`
   );
 }
 

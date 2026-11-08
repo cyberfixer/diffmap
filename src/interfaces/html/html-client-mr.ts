@@ -93,6 +93,7 @@ export const MR_CLIENT_SCRIPT = `
     t.dataset.id = d.id;
     if (d.resolved) t.title = 'Resolved';
     d.notes.forEach(function (n) { t.appendChild(noteEl(n)); });
+    if (M.readOnly) return t; // view mode: read the thread, answer in GitLab
     var rb = h('button', 'link', 'Reply');
     rb.type = 'button';
     rb.addEventListener('click', function () {
@@ -169,7 +170,7 @@ export const MR_CLIENT_SCRIPT = `
     newGen.replaceWith(c);
     c.querySelector('textarea').focus();
   });
-  gen.appendChild(newGen);
+  if (!M.readOnly) gen.appendChild(newGen);
   ov.appendChild(gen);
 
   // ── place existing threads ──
@@ -186,7 +187,7 @@ export const MR_CLIENT_SCRIPT = `
   });
 
   // ── click a line number to comment on that line ──
-  byId('cv').addEventListener('click', function (e) {
+  if (!M.readOnly) byId('cv').addEventListener('click', function (e) {
     var g = e.target.closest('.lo, .ln');
     if (!g || G.wasDrag()) return;
     var row = g.closest('.dl');

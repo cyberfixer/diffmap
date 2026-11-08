@@ -112,6 +112,15 @@ export class GitLabClient implements MergeRequestHostPort {
     return { state: pending ? "pending" : "none" };
   }
 
+  /** Scopes of a personal access token (null for other kinds of tokens, e.g. OAuth). */
+  async tokenScopes(): Promise<string[] | null> {
+    try {
+      return (await this.call<{ scopes: string[] }>("GET", "/personal_access_tokens/self")).scopes;
+    } catch {
+      return null;
+    }
+  }
+
   async currentUser(): Promise<Person> {
     return person(await this.call<GlUser>("GET", "/user"));
   }
