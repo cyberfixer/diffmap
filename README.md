@@ -4,7 +4,9 @@ Review code changes as a map. gitmap finds which functions a change touches
 and where they are used, and shows it all on one page: changed files, the
 functions that call them, and arrows between them.
 
-It works on TypeScript (`.ts`, `.tsx`) code. There are two ways to use it:
+It understands TypeScript, JavaScript, Python, Java, Go, C#, PHP, Ruby, Rust,
+Kotlin, Swift, Scala, C and C++. Other changed files (YAML, SQL, Markdown…)
+still show up, just without functions and arrows. There are two ways to use it:
 
 - **Command line**: make a report for any two branches or commits in a local repo.
 - **GitLab service**: open any merge request from your self-hosted GitLab as a map,
@@ -73,11 +75,14 @@ Save it and copy the **Application ID** and **Secret**.
 
 ### Step 2: run it
 
-Edit the values in `docker-compose.yml`, then:
+Copy the example settings and fill them in:
 
 ```bash
+cp .env.example .env     # then edit .env
 docker compose up -d --build
 ```
+
+`.env` holds your secret, so it is in `.gitignore` and never committed.
 
 Or with plain Docker:
 
@@ -105,6 +110,18 @@ docker run -d --name gitmap -p 8080:8080 -v gitmap-data:/data \
 
 Check it's running: `curl http://localhost:8080/healthz` prints `ok`.
 
+### Using the official gitlab.com
+
+It works the same way. To try it on your own machine:
+
+1. On gitlab.com open **Edit profile → Applications → Add new application**.
+   Redirect URI `http://localhost:8080/auth/callback`, **Confidential** on, scope `api`.
+2. In `.env` set `GITLAB_URL=https://gitlab.com`, `PUBLIC_URL=http://localhost:8080`
+   and the application ID and secret.
+3. `docker compose up -d --build`, then open `http://localhost:8080`.
+
+You can open merge requests in any project your gitlab.com account can see.
+
 ### Step 3: use it
 
 - Take any merge request URL and change only the host:
@@ -124,6 +141,8 @@ On the map:
   comment there.
 - Existing comments show under their lines. Click **Reply** to answer.
 - **Approve** / **Revoke approval** in the top bar works like GitLab's button.
+- Files over 500 lines (HTML files over 300) start collapsed; click **Show** to
+  open one. They also open by themselves when you select something inside them.
 - **Mark as viewed** tracks your own progress. It is saved on the server for your
   GitLab user, so it is still there after closing the browser or on another computer.
 
@@ -170,5 +189,16 @@ The code is split into layers. Inner layers never import outer ones.
 | `src/infrastructure/` | Real implementations: git, TypeScript parsing (ts-morph), GitLab API and sign-in |
 | `src/interfaces/` | Entry points: the CLI, the HTML report, the web server |
 
-To support another language, add a new symbol parser and call graph that
-implement the ports in `src/application/ports/`. Nothing else needs to change.
+How languages work:
+
+- **TypeScript** uses the TypeScript compiler, so calls are resolved exactly.
+- **Everything else** uses [tree-sitter](https://tree-sitter.github.io/). Each language is
+  a few lines in `src/infrastructure/parsers/tree-sitter/languages.ts` saying which
+  syntax nodes are definitions and which are calls. Calls are matched by name, so two
+  unrelated methods with the same name can both be linked.
+
+To add a language that tree-sitter has a grammar for, add an entry to that file
+(and to the grammar list in the `Dockerfile`), plus a test in `tests/tree-sitter.test.ts`.
+
+GitHub Actions runs the typecheck, the tests and a Docker build on every push
+(`.github/workflows/ci.yml`).

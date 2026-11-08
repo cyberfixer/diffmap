@@ -1,4 +1,18 @@
 node_modules/
 dist/
 *.js.map
+coverage/
+
+# generated reports
 report.html
+*.report.html
+
+# local settings and secrets (copy .env.example to .env)
+.env
+.env.*
+!.env.example
+
+# example repos made for testing
+examples/sample-repo/
+
+.DS_Store
