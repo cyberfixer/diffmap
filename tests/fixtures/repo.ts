@@ -9,6 +9,8 @@ export interface FixtureRepo {
   write(relPath: string, content: string): void;
   /** Create a commit with all staged changes. */
   commit(message: string): string;
+  /** Run any git command in the repo. */
+  git(...args: string[]): string;
   cleanup(): void;
 }
 
@@ -52,6 +54,7 @@ export function createFixtureRepo(): FixtureRepo {
     commit(message: string): string {
       return git("commit", "-m", message);
     },
+    git,
     cleanup(): void {
       rmSync(dir, { recursive: true, force: true });
     },

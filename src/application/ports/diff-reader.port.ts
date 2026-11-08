@@ -1,4 +1,5 @@
 import type { FileChange } from "../../domain/file-change.js";
+import type { RangeInfo } from "../../domain/analysis-result.js";
 
 /**
  * Abstracts reading diffs from a version-control system.
@@ -13,4 +14,7 @@ export interface DiffReaderPort {
 
   /** Resolve a symbolic ref (branch name, tag, HEAD…) to a full SHA. */
   resolveRef(ref: string): string;
+
+  /** Branch names, commit count and title of the range (like a merge request header). */
+  describeRange?(base: string, head: string, mergeBase: string): RangeInfo;
 }

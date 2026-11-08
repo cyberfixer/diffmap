@@ -97,15 +97,60 @@ describe("call graph", () => {
     expect(caller.labels).toEqual(['@Patch(":id")']);
     expect(callee.changed).toBe(false);
 
-    expect(result.edges).toContainEqual({
+    expect(result.edges).toContainEqual(expect.objectContaining({
       from: caller.id,
       to: changed.id,
       kind: "calls",
-    });
-    expect(result.edges).toContainEqual({
+    }));
+    expect(result.edges).toContainEqual(expect.objectContaining({
       from: changed.id,
       to: callee.id,
       kind: "calls",
+    }));
+  });
+
+  it("records where each call is written and the caller's whole source", () => {
+    repo = createFixtureRepo();
+    repo.write("src/tasks.service.ts", SERVICE_V1);
+    repo.write("src/tasks.controller.ts", CONTROLLER);
+    repo.commit("initial");
+    repo.write("src/tasks.service.ts", SERVICE_V2);
+    repo.commit("guard");
+
+    const result = makeAnalyzer(repo.dir).execute("HEAD~1", "HEAD");
+    const edge = result.edges.find(
+      (e) => e.from === "src/tasks.controller.ts#TasksController.update" && e.to === "src/tasks.service.ts#TasksService.update"
+    )!;
+    expect(edge.sites).toEqual([{ line: 9, text: "    return this.service.update(id);" }]);
+
+    const caller = result.nodes.find((n) => n.id === edge.from)!;
+    expect(caller.line).toBe(7); // starts at its decorator
+    expect(caller.endLine).toBe(10);
+    expect(caller.code).toEqual([
+      '  @Patch(":id")',
+      "  update(id: number) {",
+      "    return this.service.update(id);",
+      "  }",
+    ]);
+
+    // Changed symbols are shown from the file view, so they carry no copy of their code.
+    expect(result.nodes.find((n) => n.id === edge.to)!.code).toBeUndefined();
+  });
+
+  it("describes the range with branch names and commit count", () => {
+    repo = createFixtureRepo();
+    repo.write("src/tasks.service.ts", SERVICE_V1);
+    repo.commit("initial");
+    repo.git("checkout", "-b", "feature/guard");
+    repo.write("src/tasks.service.ts", SERVICE_V2);
+    repo.commit("Guard negative ids");
+
+    const result = makeAnalyzer(repo.dir).execute("main", "HEAD");
+    expect(result.range).toEqual({
+      baseName: "main",
+      headName: "feature/guard",
+      commits: 1,
+      title: "Guard negative ids",
     });
   });
 
@@ -149,10 +194,10 @@ describe("call graph", () => {
     const removed = result.nodes.find((n) => n.name === "Svc.count")!;
 
     expect(removed.status).toBe("removed");
-    expect(result.edges).toContainEqual({
+    expect(result.edges).toContainEqual(expect.objectContaining({
       from: "src/use.ts#use",
       to: "src/svc.ts#Svc.count",
       kind: "calls-removed",
-    });
+    }));
   });
 });

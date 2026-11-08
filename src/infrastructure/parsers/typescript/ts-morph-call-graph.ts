@@ -4,7 +4,7 @@ import type {
   CallGraphPort,
   CallGraphResult,
 } from "../../../application/ports/call-graph.port.js";
-import type { GraphEdge, GraphNode } from "../../../domain/graph.js";
+import type { CallSite, GraphEdge, GraphNode } from "../../../domain/graph.js";
 import { listSymbolNodes } from "./symbols.js";
 
 export class TsMorphCallGraph implements CallGraphPort {
@@ -30,8 +30,10 @@ export class TsMorphCallGraph implements CallGraphPort {
     // Index every symbol by its AST node.
     const idOf = new Map<Node, string>();
     const meta = new Map<string, GraphNode>();
+    const linesOf = new Map<string, string[]>();
     for (const sf of project.getSourceFiles()) {
       const file = sf.getFilePath().replace(/^\//, "");
+      linesOf.set(file, sf.getFullText().split("\n").map((l) => l.replace(/\r$/, "")));
       for (const sn of listSymbolNodes(sf)) {
         const id = `${file}#${sn.info.name}`;
         if (meta.has(id)) continue; // overloads: keep the first
@@ -43,6 +45,7 @@ export class TsMorphCallGraph implements CallGraphPort {
           kind: sn.info.kind,
           changed: false,
           line: sn.info.range.start,
+          endLine: sn.info.range.end,
           labels: sn.labels,
         });
       }
@@ -55,13 +58,15 @@ export class TsMorphCallGraph implements CallGraphPort {
     }
 
     // Resolve every call / new expression to the symbol it targets.
-    const calls: GraphEdge[] = [];
-    const seen = new Set<string>();
-    const addEdge = (from: string, to: string, kind: GraphEdge["kind"]): void => {
+    const calls = new Map<string, GraphEdge & { sites: CallSite[] }>();
+    const addEdge = (from: string, to: string, kind: GraphEdge["kind"], call: Node): void => {
+      if (from === to) return;
       const key = `${from}>${to}>${kind}`;
-      if (from === to || seen.has(key)) return;
-      seen.add(key);
-      calls.push({ from, to, kind });
+      const edge = calls.get(key) ?? calls.set(key, { from, to, kind, sites: [] }).get(key)!;
+      const line = call.getStartLineNumber();
+      if (edge.sites.some((s) => s.line === line)) return;
+      const file = call.getSourceFile().getFilePath().replace(/^\//, "");
+      edge.sites.push({ line, text: linesOf.get(file)?.[line - 1] ?? "" });
     };
 
     for (const sf of project.getSourceFiles()) {
@@ -80,7 +85,7 @@ export class TsMorphCallGraph implements CallGraphPort {
 
         const to = decls.map((d) => idOf.get(d)).find((id) => id !== undefined);
         if (to) {
-          addEdge(from, to, "calls");
+          addEdge(from, to, "calls", call);
         } else if (decls.length === 0) {
           // Unresolved: if the name matches a removed symbol, it is probably
           // a call to code this diff deleted.
@@ -90,7 +95,7 @@ export class TsMorphCallGraph implements CallGraphPort {
               ? target.getText()
               : undefined;
           for (const removedId of (name && removedByName.get(name)) || []) {
-            addEdge(from, removedId, "calls-removed");
+            addEdge(from, removedId, "calls-removed", call);
           }
         }
       }
@@ -99,7 +104,7 @@ export class TsMorphCallGraph implements CallGraphPort {
     // Walk outward from the changed symbols, `depth` hops each direction.
     const out = new Map<string, Set<string>>();
     const inn = new Map<string, Set<string>>();
-    for (const e of calls) {
+    for (const e of calls.values()) {
       if (e.kind !== "calls") continue;
       (out.get(e.from) ?? out.set(e.from, new Set()).get(e.from)!).add(e.to);
       (inn.get(e.to) ?? inn.set(e.to, new Set()).get(e.to)!).add(e.from);
@@ -109,7 +114,8 @@ export class TsMorphCallGraph implements CallGraphPort {
     const included = new Set(changed);
     const edges = new Map<string, GraphEdge>();
     const keep = (from: string, to: string): void => {
-      edges.set(`${from}>${to}>calls`, { from, to, kind: "calls" });
+      const key = `${from}>${to}>calls`;
+      edges.set(key, calls.get(key)!);
     };
 
     for (const direction of ["callees", "callers"] as const) {
@@ -130,7 +136,7 @@ export class TsMorphCallGraph implements CallGraphPort {
     }
 
     // Calls into removed symbols always show, with their callers.
-    for (const e of calls) {
+    for (const e of calls.values()) {
       if (e.kind !== "calls-removed") continue;
       edges.set(`${e.from}>${e.to}>${e.kind}`, e);
       included.add(e.from);
@@ -139,7 +145,14 @@ export class TsMorphCallGraph implements CallGraphPort {
     const nodes: GraphNode[] = [];
     for (const id of included) {
       const n = meta.get(id);
-      if (n) nodes.push({ ...n, changed: changed.has(id) });
+      if (!n) continue;
+      const isChanged = changed.has(id);
+      // Unchanged neighbours carry their whole source, so the report can show
+      // a caller outside the diff in full.
+      const code = isChanged
+        ? undefined
+        : linesOf.get(n.file)?.slice(n.line - 1, n.endLine ?? n.line);
+      nodes.push({ ...n, changed: isChanged, ...(code ? { code } : {}) });
     }
 
     return { nodes, edges: [...edges.values()] };

@@ -59,7 +59,9 @@ export class AnalyzeRangeUseCase {
 
     const { nodes, edges } = this.buildGraph(symbols, resolvedHead, options.depth ?? 1);
 
-    return { base: resolvedBase, head: resolvedHead, symbols, nodes, edges, files };
+    const range = this.diffReader.describeRange?.(base, head, mergeBase);
+
+    return { base: resolvedBase, head: resolvedHead, symbols, nodes, edges, files, ...(range ? { range } : {}) };
   }
 
   private buildGraph(
@@ -103,6 +105,7 @@ export class AnalyzeRangeUseCase {
         changed: true,
         status: s.status,
         line: s.headRange?.start ?? s.baseRange?.start ?? 0,
+        endLine: s.headRange?.end ?? s.baseRange?.end,
         labels: existing?.labels ?? [],
       });
     }
