@@ -31,6 +31,14 @@ export function listSymbolNodes(sourceFile: SourceFile): SymbolNode[] {
     } else if (Node.isClassDeclaration(node)) {
       name = node.getName() ?? null;
       if (name) kind = "class";
+    } else if (Node.isPropertyDeclaration(node)) {
+      // class A { handler = () => {...} } — a method in all but syntax
+      const init = node.getInitializer();
+      if (init && (Node.isArrowFunction(init) || Node.isFunctionExpression(init))) {
+        const cls = node.getFirstAncestorByKind(SyntaxKind.ClassDeclaration);
+        name = cls?.getName() ? `${cls.getName()}.${node.getName()}` : node.getName();
+        kind = "arrow";
+      }
     } else if (Node.isInterfaceDeclaration(node)) {
       name = node.getName();
       kind = "interface";

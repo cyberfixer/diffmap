@@ -8,6 +8,9 @@
 
 ## Done
 
+### 3. Arrow functions as class properties — DONE
+- `handler = () => {...}` (and `= function () {}`) inside a class is a symbol in TypeScript and JavaScript; `this.handler()` links to it inside its class.
+
 ### 15. Better name matching — DONE
 - Without an index, calls are narrowed to what the caller can reach: `self.x()`/`this.x()` → same class; `Svc.x()` or a variable with a written-down type → that class; else same file, then imported files or the same folder/package. Unreachable names are linked only when unique in the repo.
 
@@ -64,9 +67,6 @@
 ### 4. `type` aliases are not symbols (rest of item 4)
 - Interfaces and enums are symbols now; TypeScript `type X = ...` still falls into `top-level`.
 
-### 3. Arrow functions as class properties are missed
-- `handler = () => {...}` inside a class is not recognised (only `const x = () =>` is).
-
 ### 16. "Viewed" resets when a function changes again
 - Today a function stays marked as viewed even if a later push changes it. GitLab resets its own "viewed" in that case; diffmap should too.
 
@@ -98,4 +98,4 @@
 
 ## Suggested order
 
-Then the real tests above. Then 4 → 3 → 16 → 17, which make day-to-day reviews more accurate. 18, 19, 7, 9 and 20 after that, in any order.
+Then the real tests above. Then 4 → 16 → 17, which make day-to-day reviews more accurate. 18, 19, 7, 9 and 20 after that, in any order.

@@ -155,3 +155,18 @@ describe("TypeScript symbol analysis", () => {
     expect(topLevel!.file).toBe("src/config.ts");
   });
 });
+
+describe("arrow functions as class properties (roadmap 3)", () => {
+  it("are symbols, and calls through this.x() resolve to them exactly", async () => {
+    const { listSymbolNodes } = await import("../src/infrastructure/parsers/typescript/symbols.js");
+    const { Project } = await import("ts-morph");
+    const { TsMorphCallGraph } = await import("../src/infrastructure/parsers/typescript/ts-morph-call-graph.js");
+    const src = "export class Form {\n  handler = () => {\n    this.validate();\n  };\n  validate = (): boolean => true;\n  count = 1;\n}\n";
+    const sf = new Project({ useInMemoryFileSystem: true }).createSourceFile("form.ts", src);
+    expect(listSymbolNodes(sf).map((s) => `${s.info.kind} ${s.info.name} ${s.info.range.start}`)).toEqual([
+      "class Form 1", "arrow Form.handler 2", "arrow Form.validate 5",
+    ]);
+    const g = new TsMorphCallGraph().build({ files: [{ path: "form.ts", source: src }], changedIds: ["form.ts#Form.validate"], removed: [], depth: 1 });
+    expect(g.edges).toContainEqual(expect.objectContaining({ from: "form.ts#Form.handler", to: "form.ts#Form.validate", kind: "calls" }));
+  });
+});

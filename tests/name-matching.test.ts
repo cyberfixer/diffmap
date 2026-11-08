@@ -96,3 +96,12 @@ describe("helpers", () => {
     expect(v.canSee("web/app.js", "other/thing.js")).toBe(false);
   });
 });
+
+describe("arrow functions as class properties (roadmap 3)", () => {
+  it("JavaScript: they are symbols, and this.handler() links inside the class", async () => {
+    const engine = await TreeSitterEngine.load();
+    const src = "class Form {\n  handler = () => {\n    this.validate();\n  };\n  validate = function () {};\n  count = 1;\n}\n";
+    expect(engine.symbols("form.js", src).map((s) => `${s.kind} ${s.name}`)).toEqual(["class Form", "arrow Form.handler", "arrow Form.validate"]);
+    expect(callersOf({ "form.js": src }, "form.js#Form.validate")).toEqual(["form.js#Form.handler"]);
+  });
+});

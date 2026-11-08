@@ -75,6 +75,12 @@ export const LANGUAGES: LanguageSpec[] = [
         kind: "arrow",
         when: (n) => /^(arrow_function|function|function_expression)$/.test(n.childForFieldName("value")?.type ?? ""),
       },
+      // class A { handler = () => {...} }
+      field_definition: {
+        kind: "arrow",
+        when: (n) => /^(arrow_function|function|function_expression)$/.test(n.childForFieldName("value")?.type ?? ""),
+        name: (n) => n.childForFieldName("property")?.text ?? null,
+      },
     },
     calls: { call_expression: field("function"), new_expression: field("constructor") },
   },
