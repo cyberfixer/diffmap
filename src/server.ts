@@ -2,7 +2,7 @@ import { ReviewMergeRequestUseCase } from "./application/use-cases/review-merge-
 import { GitLabClient } from "./infrastructure/gitlab/gitlab-client.js";
 import { GitLabOAuth } from "./infrastructure/gitlab/gitlab-oauth.js";
 import { GitRepoCache } from "./infrastructure/gitlab/git-repo-cache.js";
-import { TsHighlighter } from "./infrastructure/parsers/typescript/ts-highlighter.js";
+import { loadLanguageSupport } from "./infrastructure/language-support.js";
 import { FileViewedStore } from "./infrastructure/storage/file-viewed-store.js";
 import { WorkerAnalyzer } from "./infrastructure/worker/worker-analyzer.js";
 import { configFromEnv } from "./interfaces/server/config.js";
@@ -37,7 +37,7 @@ const app = createApp({
     analyzer.analyze(gitDir, base, head),
   ),
   viewed: new FileViewedStore(`${config.dataDir}/viewed.json`),
-  highlighters: [new TsHighlighter()],
+  highlighters: (await loadLanguageSupport()).highlighters,
 });
 
 app.listen(config.port, () => {

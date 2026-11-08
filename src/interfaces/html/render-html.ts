@@ -26,6 +26,20 @@ export interface MrPage {
 
 export interface RenderOptions {
   mr?: MrPage;
+  /** Files longer than this start collapsed in the map (default 500). */
+  maxLines?: number;
+  /** The same for HTML files, which are often long and generated (default 300). */
+  maxHtmlLines?: number;
+}
+
+const DEFAULT_MAX_LINES = 500;
+const DEFAULT_MAX_HTML_LINES = 300;
+
+/** Whether a file starts collapsed because it is long. */
+export function isLargeFile(view: FileView, options: RenderOptions = {}): boolean {
+  const lines = view.lines.filter((l) => l.type !== "del").length || view.lines.length;
+  const html = /\.html?$/i.test(view.path);
+  return lines > (html ? options.maxHtmlLines ?? DEFAULT_MAX_HTML_LINES : options.maxLines ?? DEFAULT_MAX_LINES);
 }
 
 const esc = (s: string): string =>
@@ -53,6 +67,11 @@ const KIND_LABEL: Record<string, string> = {
   method: "method",
   class: "class",
   arrow: "arrow function",
+  interface: "interface",
+  struct: "struct",
+  enum: "enum",
+  trait: "trait",
+  module: "module",
   "top-level": "top-level code",
 };
 
@@ -227,7 +246,8 @@ export function renderHtml(
   // ── left column: one card per changed file ──
   let addedLines = 0;
   let removedLines = 0;
-  const leftW = Math.max(MIN_W, ...views.map((v) => codeWidth(v.lines.map((l) => l.text))));
+  // Collapsed large files don't make every card wide.
+  const leftW = Math.max(MIN_W, ...views.filter((v) => !isLargeFile(v, options)).map((v) => codeWidth(v.lines.map((l) => l.text))));
   const symsByFile = new Map<string, number[]>();
   changed.forEach((n, k) => symsByFile.set(n.file, [...(symsByFile.get(n.file) ?? []), k]));
 
@@ -282,9 +302,14 @@ export function renderHtml(
       const expand = folded
         ? `<button class="cbtn expand" type="button" aria-pressed="false" title="Show the whole file">Whole file</button>`
         : "";
-      return `<section class="card in" id="c${fi}" style="left:${MARGIN}px;width:${leftW}px">
+      const large = isLargeFile(view, options);
+      const total = view.lines.filter((l) => l.type !== "del").length || view.lines.length;
+      const bigBar = large
+        ? `<button class="bigbar" type="button">${total.toLocaleString("en-US")} lines · hidden because the file is large · <b>Show</b></button>`
+        : "";
+      return `<section class="card in${large ? " big" : ""}" id="c${fi}" style="left:${MARGIN}px;width:${leftW}px">
   <header class="ch">${pathHtml(view.path)}${copyButton(view.path)}${expand}<span class="cmeta"><span class="add">+${add}</span><span class="del">−${del}</span></span></header>
-  <div class="code">${rows.join("")}</div>
+  ${bigBar}<div class="code">${rows.join("")}</div>
 </section>`;
     })
     .join("\n");
@@ -425,7 +450,7 @@ export function renderHtml(
       </div>
     </div>
     <div id="vp">
-      ${empty ? `<p class="empty" style="padding:40px;text-align:center">No changed TypeScript files in this range.</p>` : ""}
+      ${empty ? `<p class="empty" style="padding:40px;text-align:center">No changed files in this range.</p>` : ""}
       <div id="cv">
         <svg id="sv" width="10" height="10" aria-hidden="true">
           <defs>

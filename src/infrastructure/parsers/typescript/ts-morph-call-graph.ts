@@ -4,7 +4,8 @@ import type {
   CallGraphPort,
   CallGraphResult,
 } from "../../../application/ports/call-graph.port.js";
-import type { CallSite, GraphEdge, GraphNode } from "../../../domain/graph.js";
+import type { GraphEdge, GraphNode } from "../../../domain/graph.js";
+import { CallCollector, walkNeighbourhood } from "../../../application/call-graph-walk.js";
 import { listSymbolNodes } from "./symbols.js";
 
 export class TsMorphCallGraph implements CallGraphPort {
@@ -58,15 +59,11 @@ export class TsMorphCallGraph implements CallGraphPort {
     }
 
     // Resolve every call / new expression to the symbol it targets.
-    const calls = new Map<string, GraphEdge & { sites: CallSite[] }>();
+    const collector = new CallCollector();
     const addEdge = (from: string, to: string, kind: GraphEdge["kind"], call: Node): void => {
-      if (from === to) return;
-      const key = `${from}>${to}>${kind}`;
-      const edge = calls.get(key) ?? calls.set(key, { from, to, kind, sites: [] }).get(key)!;
       const line = call.getStartLineNumber();
-      if (edge.sites.some((s) => s.line === line)) return;
       const file = call.getSourceFile().getFilePath().replace(/^\//, "");
-      edge.sites.push({ line, text: linesOf.get(file)?.[line - 1] ?? "" });
+      collector.add(from, to, kind, line, linesOf.get(file)?.[line - 1] ?? "");
     };
 
     for (const sf of project.getSourceFiles()) {
@@ -101,61 +98,7 @@ export class TsMorphCallGraph implements CallGraphPort {
       }
     }
 
-    // Walk outward from the changed symbols, `depth` hops each direction.
-    const out = new Map<string, Set<string>>();
-    const inn = new Map<string, Set<string>>();
-    for (const e of calls.values()) {
-      if (e.kind !== "calls") continue;
-      (out.get(e.from) ?? out.set(e.from, new Set()).get(e.from)!).add(e.to);
-      (inn.get(e.to) ?? inn.set(e.to, new Set()).get(e.to)!).add(e.from);
-    }
-
-    const changed = new Set(input.changedIds.filter((id) => meta.has(id)));
-    const included = new Set(changed);
-    const edges = new Map<string, GraphEdge>();
-    const keep = (from: string, to: string): void => {
-      const key = `${from}>${to}>calls`;
-      edges.set(key, calls.get(key)!);
-    };
-
-    for (const direction of ["callees", "callers"] as const) {
-      let frontier = new Set(changed);
-      for (let hop = 0; hop < input.depth; hop++) {
-        const next = new Set<string>();
-        for (const id of frontier) {
-          const neighbours = (direction === "callees" ? out : inn).get(id) ?? [];
-          for (const n of neighbours) {
-            if (direction === "callees") keep(id, n);
-            else keep(n, id);
-            if (!included.has(n)) next.add(n);
-            included.add(n);
-          }
-        }
-        frontier = next;
-      }
-    }
-
-    // Calls into removed symbols always show, with their callers.
-    for (const e of calls.values()) {
-      if (e.kind !== "calls-removed") continue;
-      edges.set(`${e.from}>${e.to}>${e.kind}`, e);
-      included.add(e.from);
-    }
-
-    const nodes: GraphNode[] = [];
-    for (const id of included) {
-      const n = meta.get(id);
-      if (!n) continue;
-      const isChanged = changed.has(id);
-      // Unchanged neighbours carry their whole source, so the report can show
-      // a caller outside the diff in full.
-      const code = isChanged
-        ? undefined
-        : linesOf.get(n.file)?.slice(n.line - 1, n.endLine ?? n.line);
-      nodes.push({ ...n, changed: isChanged, ...(code ? { code } : {}) });
-    }
-
-    return { nodes, edges: [...edges.values()] };
+    return walkNeighbourhood({ meta, linesOf, calls: collector.calls, changedIds: input.changedIds, depth: input.depth });
   }
 }
 

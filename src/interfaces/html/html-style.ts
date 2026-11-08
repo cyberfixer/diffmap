@@ -145,6 +145,12 @@ export const STYLE = `
   .dl.flash { animation:flash 1.2s ease-out; }
   @keyframes flash { 0% { background:var(--accent-bg); } 100% { } }
   .card:not(.whole) .dl.far { display:none; }
+  .card.big .code, .card.big .expand { display:none; }
+  .bigbar { display:block; width:100%; border:0; padding:10px 12px; text-align:left; background:var(--chip); color:var(--muted);
+            font:13px 'IBM Plex Sans', system-ui, sans-serif; cursor:pointer; }
+  .bigbar:hover { color:var(--fg); background:var(--hover); }
+  .bigbar b { color:var(--accent); font-weight:500; }
+  .card:not(.big) .bigbar { display:none; }
   .card.whole .gap { display:none; }
   .gap { display:block; width:100%; border:0; padding:2px 0 2px 96px; text-align:left; background:var(--chip);
          color:var(--muted); font:italic 12px/18px 'IBM Plex Sans', system-ui, sans-serif; cursor:pointer; }

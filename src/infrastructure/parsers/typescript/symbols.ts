@@ -1,11 +1,7 @@
 import { Node, SyntaxKind, type SourceFile } from "ts-morph";
-import type { LineRange, SymbolKind } from "../../../domain/symbol.js";
+import type { SymbolInfo, SymbolKind } from "../../../domain/symbol.js";
 
-export interface SymbolInfo {
-  name: string;
-  kind: SymbolKind;
-  range: LineRange;
-}
+export type { SymbolInfo };
 
 export interface SymbolNode {
   info: SymbolInfo;

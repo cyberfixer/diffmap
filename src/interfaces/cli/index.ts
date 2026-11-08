@@ -1,9 +1,7 @@
 import { AnalyzeRangeUseCase } from "../../application/use-cases/analyze-range.js";
 import { GitDiffReader } from "../../infrastructure/git/git-diff-reader.js";
 import { GitSourceReader } from "../../infrastructure/git/git-source-reader.js";
-import { TsMorphAdapter } from "../../infrastructure/parsers/typescript/ts-morph.adapter.js";
-import { TsMorphCallGraph } from "../../infrastructure/parsers/typescript/ts-morph-call-graph.js";
-import { TsHighlighter } from "../../infrastructure/parsers/typescript/ts-highlighter.js";
+import { loadLanguageSupport } from "../../infrastructure/language-support.js";
 import { renderHtml } from "../html/render-html.js";
 
 function usage(): void {
@@ -68,17 +66,12 @@ export async function runCli(): Promise<void> {
     process.exit(1);
   }
 
-  const useCase = new AnalyzeRangeUseCase(
-    new GitDiffReader(),
-    new GitSourceReader(),
-    [new TsMorphAdapter()],
-    [new TsMorphCallGraph()],
-  );
-
   try {
+    const langs = await loadLanguageSupport();
+    const useCase = new AnalyzeRangeUseCase(new GitDiffReader(), new GitSourceReader(), langs.parsers, langs.graphs);
     const result = useCase.execute(base, head, { depth });
     process.stdout.write(
-      format === "html" ? renderHtml(result, [new TsHighlighter()]) : JSON.stringify(result, null, 2) + "\n"
+      format === "html" ? renderHtml(result, langs.highlighters) : JSON.stringify(result, null, 2) + "\n"
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

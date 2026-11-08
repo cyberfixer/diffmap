@@ -14,7 +14,7 @@ These come first because everything later builds on this output.
 - **Fix:** check whether the symbol exists in the whole base file and the whole head file, not just on the changed lines.
 - **Status:** fixed; covered by tests for add-only and remove-only edits.
 
-### 2. `.tsx` files may parse wrongly
+### 2. `.tsx` files may parse wrongly — DONE
 - **Problem:** every file is parsed as `.ts`, and JSX is not valid there.
 - **Fix:** parse the file with its real extension.
 
@@ -50,8 +50,9 @@ These come first because everything later builds on this output.
 ### 9. Nx support
 - **Adds:** understand Nx monorepo project boundaries, so callers are labelled by project.
 
-### 10. Other languages
-- **Adds:** one new `SymbolParserPort` implementation per language. Nothing else changes.
+### 10. Other languages — DONE (tree-sitter)
+- **Status:** JavaScript, Python, Java, Go, C#, PHP, Ruby, Rust, Kotlin, Swift, Scala, C and C++ through tree-sitter (symbols, call graph by name, highlighting). TypeScript keeps the TypeScript compiler, which resolves calls exactly. Other changed text files show as plain cards.
+- **Known gap:** name matching can over-link when unrelated classes share a method name (calls with more than 5 same-named targets are skipped). Precise indexes (SCIP) built in CI could fix this per project.
 
 ## Order
 

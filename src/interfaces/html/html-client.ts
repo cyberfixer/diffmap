@@ -151,6 +151,11 @@ export const CLIENT_SCRIPT = `
     qa('.dl.sel').forEach(function (r) { r.classList.remove('sel'); });
     qa('.dl.hit').forEach(function (r) { r.classList.remove('hit', 'bad'); });
     if (sel !== null) {
+      // A large file stays collapsed until something in it is selected.
+      [defRow[sel]].concat(syms[sel].refs.map(function (r) { return byId(r.el); })).forEach(function (el) {
+        var c = el && el.closest('.card.big');
+        if (c) c.classList.remove('big');
+      });
       if (defRow[sel]) defRow[sel].classList.add('sel');
       syms[sel].refs.forEach(function (r) {
         var el = byId(r.el);
@@ -173,6 +178,8 @@ export const CLIENT_SCRIPT = `
     if (moved) return;
     var gap = e.target.closest('.gap');
     if (gap) { expandGap(gap); return; }
+    var big = e.target.closest('.bigbar');
+    if (big) { big.closest('.card').classList.remove('big'); relayout(); return; }
     var ex = e.target.closest('.expand');
     if (ex) { wholeFile(ex); return; }
     var row = e.target.closest('.dl.def');

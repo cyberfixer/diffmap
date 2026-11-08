@@ -1,0 +1,127 @@
+import { describe, it, expect, beforeAll, afterEach } from "vitest";
+import { TreeSitterEngine } from "../src/infrastructure/parsers/tree-sitter/engine.js";
+import { TreeSitterCallGraph } from "../src/infrastructure/parsers/tree-sitter/tree-sitter-call-graph.js";
+import { TreeSitterHighlighter } from "../src/infrastructure/parsers/tree-sitter/tree-sitter-highlighter.js";
+import { loadLanguageSupport } from "../src/infrastructure/language-support.js";
+import { AnalyzeRangeUseCase } from "../src/application/use-cases/analyze-range.js";
+import { GitDiffReader } from "../src/infrastructure/git/git-diff-reader.js";
+import { GitSourceReader } from "../src/infrastructure/git/git-source-reader.js";
+import { createFixtureRepo, type FixtureRepo } from "./fixtures/repo.js";
+
+let engine: TreeSitterEngine;
+beforeAll(async () => {
+  engine = await TreeSitterEngine.load();
+});
+
+const names = (path: string, src: string) => engine.symbols(path, src).map((s) => `${s.kind} ${s.name} ${s.range.start}-${s.range.end}`);
+
+describe("tree-sitter symbols", () => {
+  it("Python: classes, methods, functions", () => {
+    expect(names("a.py", "class Svc:\n    def update(self, id):\n        return self.find(id)\n\ndef login(e):\n    return e\n")).toEqual([
+      "class Svc 1-3", "method Svc.update 2-3", "function login 5-6",
+    ]);
+  });
+
+  it("Java: classes, interfaces, enums, constructors, methods", () => {
+    const src = "class Svc {\n  Svc(int a) {}\n  int update(int id) { return find(id); }\n}\ninterface P { boolean verify(String t); }\nenum E { A }\n";
+    expect(names("A.java", src)).toEqual([
+      "class Svc 1-4", "method Svc.Svc 2-2", "method Svc.update 3-3", "interface P 5-5", "method P.verify 5-5", "enum E 6-6",
+    ]);
+  });
+
+  it("Go: functions, methods named after their receiver, structs and interfaces", () => {
+    const src = "package m\n\ntype Svc struct {\n\tdb int\n}\n\nfunc (s *Svc) Update(id int) int {\n\treturn id\n}\n\nfunc Login() {}\n\ntype P interface {\n\tVerify()\n}\n";
+    expect(names("a.go", src)).toEqual(["struct Svc 3-5", "method Svc.Update 7-9", "function Login 11-11", "interface P 13-15"]);
+  });
+
+  it("JavaScript: arrow functions in variables count, plain variables do not", () => {
+    expect(names("a.js", "const go = (x) => x;\nconst n = 1;\nclass A { run() {} }\n")).toEqual([
+      "arrow go 1-1", "class A 3-3", "method A.run 3-3",
+    ]);
+  });
+
+  it("Rust, Ruby, C#, PHP, Kotlin, C++", () => {
+    expect(names("a.rs", "struct Svc;\nimpl Svc {\n    fn update(&self) {}\n}\nfn login() {}\n")).toEqual([
+      "struct Svc 1-1", "method Svc.update 3-3", "function login 5-5",
+    ]);
+    expect(names("a.rb", "class Svc\n  def update(id)\n    id\n  end\nend\n")).toEqual(["class Svc 1-5", "method Svc.update 2-4"]);
+    expect(names("a.cs", "namespace App {\n  class Svc {\n    void Update() {}\n  }\n}\n")).toEqual(["class App.Svc 2-4", "method App.Svc.Update 3-3"]);
+    expect(names("a.php", "<?php\nclass Svc {\n  function update($id) { return $id; }\n}\n")).toEqual(["class Svc 2-4", "method Svc.update 3-3"]);
+    expect(names("a.kt", "class Svc {\n    fun update(id: Int): Int {\n        return id\n    }\n}\n")).toEqual(["class Svc 1-5", "method Svc.update 2-4"]);
+    expect(names("a.cpp", "class Svc {\n public:\n  int update(int id) { return id; }\n};\nint Svc::run() { return 1; }\n")).toEqual([
+      "class Svc 1-4", "method Svc.update 3-3", "function Svc.run 5-5",
+    ]);
+  });
+
+  it("ignores files of unknown languages", () => {
+    expect(engine.symbols("notes.txt", "def x(): pass")).toEqual([]);
+  });
+});
+
+describe("tree-sitter call graph", () => {
+  const files = [
+    { path: "auth.py", source: "def login(email):\n    return check(email)\n\ndef check(e):\n    return e\n" },
+    { path: "checkout.py", source: "from auth import login\n\nclass Cart:\n    def pay(self):\n        user = login('a')\n        return user\n" },
+  ];
+
+  it("links calls to definitions by name, with the call line", () => {
+    const g = new TreeSitterCallGraph(engine).build({ files, changedIds: ["auth.py#login"], removed: [], depth: 1 });
+    expect(g.edges).toContainEqual({ from: "checkout.py#Cart.pay", to: "auth.py#login", kind: "calls", sites: [{ line: 5, text: "        user = login('a')" }] });
+    expect(g.edges).toContainEqual(expect.objectContaining({ from: "auth.py#login", to: "auth.py#check" }));
+    const caller = g.nodes.find((n) => n.id === "checkout.py#Cart.pay")!;
+    expect(caller.code).toEqual(["    def pay(self):", "        user = login('a')", "        return user"]);
+  });
+
+  it("flags calls to a name that only a removed symbol had", () => {
+    const g = new TreeSitterCallGraph(engine).build({
+      files: [{ path: "use.py", source: "def use():\n    return legacy_hash('x')\n" }],
+      changedIds: [],
+      removed: [{ id: "hash.py#legacy_hash", name: "legacy_hash" }],
+      depth: 1,
+    });
+    expect(g.edges).toEqual([expect.objectContaining({ from: "use.py#use", to: "hash.py#legacy_hash", kind: "calls-removed" })]);
+  });
+});
+
+describe("tree-sitter highlighter", () => {
+  it("colours keywords, strings, comments, numbers and called functions, line by line", () => {
+    const hl = new TreeSitterHighlighter(engine);
+    const out = hl.highlight("a.py", ["def go(x):  # note", "    return run('é', 42)"])!;
+    const kinds = out.map((line) => line.filter((t) => t.kind !== "plain").map((t) => `${t.kind}:${t.text}`));
+    expect(kinds[0]).toEqual(["keyword:def", "function:go", "comment:# note"]);
+    expect(kinds[1]).toEqual(["keyword:return", "function:run", "string:'é'", "number:42"]);
+    expect(out.map((l) => l.map((t) => t.text).join(""))).toEqual(["def go(x):  # note", "    return run('é', 42)"]);
+  });
+
+  it("keeps multi-line comments split per line", () => {
+    const out = new TreeSitterHighlighter(engine).highlight("A.java", ["/* a", "b */ int x = 1;"])!;
+    expect(out[0]).toEqual([{ text: "/* a", kind: "comment" }]);
+    expect(out[1][0]).toEqual({ text: "b */", kind: "comment" });
+  });
+});
+
+describe("analysing a Python repo end to end", () => {
+  let repo: FixtureRepo | null = null;
+  afterEach(() => {
+    repo?.cleanup();
+    repo = null;
+  });
+
+  it("finds the changed function and its caller, and still shows files it can't parse", async () => {
+    repo = createFixtureRepo();
+    repo.write("auth.py", "def login(email):\n    return email\n");
+    repo.write("checkout.py", "from auth import login\n\ndef pay():\n    return login('a')\n");
+    repo.write("config.yml", "ttl: 3600\n");
+    repo.commit("initial");
+    repo.write("auth.py", "def login(email):\n    return email.strip()\n");
+    repo.write("config.yml", "ttl: 900\n");
+    repo.commit("change");
+
+    const langs = await loadLanguageSupport();
+    const r = new AnalyzeRangeUseCase(new GitDiffReader(repo.dir), new GitSourceReader(repo.dir), langs.parsers, langs.graphs).execute("HEAD~1", "HEAD");
+
+    expect(r.symbols.map((s) => `${s.status} ${s.name}`)).toEqual(["modified login"]);
+    expect(r.edges).toContainEqual(expect.objectContaining({ from: "checkout.py#pay", to: "auth.py#login", kind: "calls" }));
+    expect(r.files.map((f) => f.path).sort()).toEqual(["auth.py", "config.yml"]);
+  });
+});

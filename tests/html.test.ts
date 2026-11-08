@@ -157,7 +157,39 @@ describe("renderHtml", () => {
 
   it("renders an empty state", () => {
     const html = renderHtml({ base: sha("a"), head: sha("b"), symbols: [], nodes: [], edges: [], files: [] });
-    expect(html).toContain("No changed TypeScript files");
+    expect(html).toContain("No changed files");
+  });
+});
+
+describe("large files", () => {
+  const file = (path: string, n: number) => ({
+    path,
+    status: "modified" as const,
+    lines: Array.from({ length: n }, (_, i) => row(i === 0 ? "add" : "ctx", i + 1, `line ${i + 1}`)),
+  });
+  const page = (files: ReturnType<typeof file>[]) =>
+    renderHtml({ base: sha("a"), head: sha("b"), symbols: [], nodes: [], edges: [], files });
+
+  it("start collapsed above 500 lines, with a button to show them", () => {
+    const html = page([file("big.py", 501), file("small.py", 500)]);
+    expect(html).toMatch(/<section class="card in big" id="c0"/);
+    expect(html).toContain("501 lines · hidden because the file is large · <b>Show</b>");
+    expect(html).toMatch(/<section class="card in" id="c1"/);
+  });
+
+  it("use a lower limit of 300 lines for HTML files", () => {
+    const html = page([file("page.html", 301), file("ok.html", 300)]);
+    expect(html).toMatch(/<section class="card in big" id="c1"/); // sorted: ok.html is c0, page.html is c1
+    expect(html).toMatch(/<section class="card in" id="c0"/);
+  });
+
+  it("can use other limits", () => {
+    const html = renderHtml(
+      { base: sha("a"), head: sha("b"), symbols: [], nodes: [], edges: [], files: [file("a.py", 50)] },
+      [],
+      { maxLines: 40 },
+    );
+    expect(html).toContain('class="card in big"');
   });
 });
 

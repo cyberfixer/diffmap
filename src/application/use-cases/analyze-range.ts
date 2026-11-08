@@ -31,21 +31,17 @@ export class AnalyzeRangeUseCase {
 
     const files: FileView[] = [];
     const symbols = fileChanges.flatMap((fc) => {
-      const ext = extname(fc.path);
-      const parser = this.parsers.find((p) =>
-        p.supportedExtensions.includes(ext)
-      );
-      if (!parser) return [];
+      const parser = this.parsers.find((p) => p.supportedExtensions.includes(extname(fc.path).toLowerCase()));
 
-      const baseSource = fc.basePath
-        ? this.sourceReader.getSource(mergeBase, fc.basePath)
-        : null;
-      const headSource = fc.headPath
-        ? this.sourceReader.getSource(resolvedHead, fc.headPath)
-        : null;
+      const baseSource = fc.basePath ? this.sourceReader.getSource(mergeBase, fc.basePath) : null;
+      const headSource = fc.headPath ? this.sourceReader.getSource(resolvedHead, fc.headPath) : null;
+      // Binary files (images, archives...) have no lines to show.
+      if ((baseSource ?? "").includes("\0") || (headSource ?? "").includes("\0")) return [];
 
+      // Every changed text file is shown; only supported languages get symbols.
       const view = buildFileView(fc, baseSource, headSource);
       if (view) files.push(view);
+      if (!parser) return [];
 
       return parser.parse({
         filePath: fc.path,
@@ -82,7 +78,7 @@ export class AnalyzeRangeUseCase {
 
       for (const builder of this.graphBuilders) {
         const files = allFiles
-          .filter((p) => builder.supportedExtensions.includes(extname(p)))
+          .filter((p) => builder.supportedExtensions.includes(extname(p).toLowerCase()))
           .flatMap((path) => {
             const source = this.sourceReader.getSource(headRev, path);
             return source === null ? [] : [{ path, source }];

@@ -3,6 +3,11 @@ export type SymbolKind =
   | "method"
   | "class"
   | "arrow"       // arrow function assigned to a variable/property
+  | "interface"
+  | "struct"
+  | "enum"
+  | "trait"
+  | "module"      // module, namespace, object (Ruby, Scala, Kotlin)
   | "top-level";  // changed lines that fall outside any named symbol
 
 export type ChangeStatus = "added" | "removed" | "modified";
@@ -29,4 +34,11 @@ export interface ChangedSymbol {
   baseRange: LineRange | null; // line range in base rev (null if added)
   headRange: LineRange | null; // line range in head rev (null if removed)
   diff: DiffLine[];            // the diff lines that belong to this symbol
+}
+
+/** A named symbol found in one version of a file. */
+export interface SymbolInfo {
+  name: string; // qualified, e.g. "MyClass.doThing"
+  kind: SymbolKind;
+  range: LineRange;
 }

@@ -179,6 +179,12 @@ export const MR_CLIENT_SCRIPT = `
     else genList.appendChild(threadEl(d));
   });
 
+  // Collapsed large files say how many comments they hide.
+  qa('.card.big').forEach(function (c) {
+    var n = c.querySelectorAll('.thread').length;
+    if (n) c.querySelector('.bigbar').appendChild(document.createTextNode(' · ' + n + (n === 1 ? ' comment' : ' comments')));
+  });
+
   // ── click a line number to comment on that line ──
   byId('cv').addEventListener('click', function (e) {
     var g = e.target.closest('.lo, .ln');
