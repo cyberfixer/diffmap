@@ -231,11 +231,16 @@ function gitOut(args: string[], cwd: string): Promise<string> {
 
 function run(args: string[], cwd: string, onLine?: (line: string) => void, input?: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    const p = spawn("git", args, { cwd, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
+    // Only open stdin when there is something to send.
+    const p = spawn("git", args, {
+      cwd,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+      stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+    });
     let out = "";
     let err = "";
-    p.stdout.on("data", (d) => (out += String(d)));
-    p.stderr.on("data", (d) => {
+    p.stdout!.on("data", (d) => (out += String(d)));
+    p.stderr!.on("data", (d) => {
       const text = String(d);
       err = (err + text).slice(-4000);
       if (onLine) for (const line of text.split(/[\r\n]+/)) if (line) onLine(line);
@@ -247,6 +252,12 @@ function run(args: string[], cwd: string, onLine?: (line: string) => void, input
         : // Never echo the auth header back.
           reject(new Error(`git ${args.find((a) => !a.startsWith("http.extraHeader") && a !== "-c")} failed: ${err.trim().slice(0, 300)}`)),
     );
-    p.stdin.end(input ?? "");
+    if (p.stdin) {
+      // If git exits before reading its input, the write fails with EPIPE. Without
+      // this handler that error takes down the whole server; the exit code already
+      // tells us whether git succeeded.
+      p.stdin.on("error", () => {});
+      p.stdin.end(input);
+    }
   });
 }
