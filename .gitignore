@@ -11,7 +11,6 @@ report.html
 .env
 .env.*
 !.env.example
-!.env.*.example
 
 # example repos made for testing
 examples/sample-repo/

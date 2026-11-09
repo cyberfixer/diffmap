@@ -4,3 +4,6 @@ tests
 examples
 *.html
 .git
+.env
+.env.*
+!.env.example

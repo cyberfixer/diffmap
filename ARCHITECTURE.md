@@ -193,7 +193,7 @@ flowchart LR
 
 ## 8. Journey 2: opening a merge request in the service
 
-One container serves one code host, chosen with `CODE_HOST` (`gitlab` or
+One diffmap serves one code host, chosen with `CODE_HOST` (`gitlab` or
 `github`). Everything below is the same for both; only the adapters differ:
 
 | | GitLab | GitHub |
@@ -295,7 +295,7 @@ The browser scripts are checked by hand in a headless browser; see the commit me
 | Change what the page looks like | [html-style.ts](src/interfaces/html/html-style.ts) (colours, layout), [render-html.ts](src/interfaces/html/render-html.ts) (markup) |
 | Change how the page behaves | [html-client.ts](src/interfaces/html/html-client.ts), and [html-client-mr.ts](src/interfaces/html/html-client-mr.ts) for comments |
 | Add a CLI option | [cli/index.ts](src/interfaces/cli/index.ts) |
-| Add a service setting | [server/config.ts](src/interfaces/server/config.ts), [src/server.ts](src/server.ts), `.env.gitlab.example` and `.env.github.example`, README |
+| Add a service setting | [server/config.ts](src/interfaces/server/config.ts), [src/server.ts](src/server.ts), `.env.example`, README |
 | Call another GitLab API | the port [merge-request.port.ts](src/application/ports/merge-request.port.ts), then [gitlab-client.ts](src/infrastructure/gitlab/gitlab-client.ts) |
 | Add a route to the service | [server/server.ts](src/interfaces/server/server.ts) |
 | Support another code host (e.g. Bitbucket) | an adapter implementing [merge-request.port.ts](src/application/ports/merge-request.port.ts) (like [github-client.ts](src/infrastructure/github/github-client.ts)), a profile in [host-profile.ts](src/interfaces/server/host-profile.ts), and a branch in [src/server.ts](src/server.ts) and [config.ts](src/interfaces/server/config.ts); the analysis and the page stay as they are |

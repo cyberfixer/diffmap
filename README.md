@@ -95,14 +95,10 @@ Run the script directly: `node /path/to/diffmap/bin/diffmap.js main --format htm
 People open a merge request (GitLab) or pull request (GitHub) and see it as a
 map. They only ever see projects they can already see on that host.
 
-Each host gets **its own container** from the same image. Run one or both:
+One diffmap serves **one code host**: GitLab or GitHub, set by `CODE_HOST`.
+To serve both, run two copies of the same image ([below](#both-gitlab-and-github)).
 
-| Container | Host | Settings file | Port |
-|---|---|---|---|
-| `diffmap-gitlab` | GitLab (self-hosted or gitlab.com) | `.env.gitlab` | 8080 |
-| `diffmap-github` | GitHub (github.com or GitHub Enterprise) | `.env.github` | 8081 |
-
-Each container runs in one of two modes:
+It runs in one of two modes:
 
 | Mode | Setup | People sign in with | Comment & approve |
 |---|---|---|---|
@@ -134,8 +130,8 @@ stays in diffmap's memory only and is forgotten on sign-out.
 | For your organization | **Organization settings → Developer settings → OAuth Apps → New OAuth App** |
 | Just for you | **Settings → Developer settings → OAuth Apps → New OAuth App** (https://github.com/settings/developers) |
 
-- **Homepage URL:** your `PUBLIC_URL`, e.g. `http://localhost:8081`
-- **Authorization callback URL:** `<PUBLIC_URL>/auth/callback`, e.g. `http://localhost:8081/auth/callback`
+- **Homepage URL:** your `PUBLIC_URL`, e.g. `http://localhost:8080`
+- **Authorization callback URL:** `<PUBLIC_URL>/auth/callback`, e.g. `http://localhost:8080/auth/callback`
 - After creating it, click **Generate a new client secret**.
 
 Copy the **ID** and **secret** of either one.
@@ -145,35 +141,40 @@ Copy the **ID** and **secret** of either one.
 In the `diffmap` folder (clone it as in [Install](#install-once) if you haven't):
 
 ```bash
-cp .env.gitlab.example .env.gitlab     # for GitLab: fill in GITLAB_URL, PUBLIC_URL (and the ID/secret for full mode)
-cp .env.github.example .env.github     # for GitHub: fill in PUBLIC_URL (and the ID/secret for full mode)
-
-docker compose up -d --build diffmap-gitlab    # just GitLab
-docker compose up -d --build diffmap-github    # just GitHub
-docker compose up -d --build                   # both
+cp .env.example .env     # set CODE_HOST (gitlab or github), PUBLIC_URL, GITLAB_URL for GitLab,
+                         # and the client ID/secret for full mode
+docker compose up -d --build
 ```
 
-The `.env.*` files hold your secrets, so they are in `.gitignore` and never committed.
-Check: `curl http://localhost:8080/healthz` (GitLab) or `:8081` (GitHub) prints `ok`.
-The log says which host and mode each container runs: `docker compose logs`.
+`.env` holds your secrets, so it is in `.gitignore` and never committed.
+Check: `curl http://localhost:8080/healthz` prints `ok`.
+The log says which host and mode it runs: `docker compose logs`.
+
+#### Both GitLab and GitHub
+
+Run a second copy with its own settings file, port and project name
+(`-p` also gives it its own data volume):
+
+```bash
+cp .env.example .env.github     # CODE_HOST=github, PUBLIC_URL=http://localhost:8081, ...
+DIFFMAP_ENV=.env.github DIFFMAP_PORT=8081 docker compose -p diffmap-github up -d
+```
+
+Stop it with `docker compose -p diffmap-github down`.
 
 <details>
 <summary>Plain Docker instead of compose</summary>
 
 ```bash
 docker build -t diffmap .
-docker run -d --name diffmap-github -p 8081:8080 -v diffmap-github-data:/data \
-  -e CODE_HOST=github \
-  -e PUBLIC_URL=http://localhost:8081 \
-  diffmap
+docker run -d --name diffmap -p 8080:8080 -v diffmap-data:/data --env-file .env diffmap
 ```
-Use `-e CODE_HOST=gitlab -e GITLAB_URL=...` for GitLab, and add the client ID
-and secret variables for full mode.
+For a second host, run it again with another name, port, volume and settings file.
 </details>
 
 | Setting | Meaning |
 |---|---|
-| `CODE_HOST` | `gitlab` or `github` (compose sets it for each container) |
+| `CODE_HOST` | `gitlab` (default) or `github` |
 | `GITLAB_URL` | Your GitLab, e.g. `https://gitlab.company.com` or `https://gitlab.com` |
 | `GITHUB_URL` | `https://github.com` (default) or your GitHub Enterprise address |
 | `GITLAB_CLIENT_ID`, `GITLAB_CLIENT_SECRET` / `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | From step 1; leave both empty for view-only mode |
@@ -192,7 +193,7 @@ Take its URL and change only the host to your diffmap:
 | On the host | On diffmap |
 |---|---|
 | `https://gitlab.company.com/team/api/-/merge_requests/42` | `http://localhost:8080/team/api/-/merge_requests/42` |
-| `https://github.com/acme/api/pull/42` | `http://localhost:8081/acme/api/pull/42` |
+| `https://github.com/acme/api/pull/42` | `http://localhost:8080/acme/api/pull/42` |
 
 Or open diffmap's start page and paste the link.
 

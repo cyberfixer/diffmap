@@ -1,44 +1,28 @@
-# One container per code host, from the same image. Start one or both:
-#   docker compose up -d diffmap-gitlab     # settings in .env.gitlab, port 8080
-#   docker compose up -d diffmap-github     # settings in .env.github, port 8081
-#   docker compose up -d                    # both
-# Copy .env.gitlab.example / .env.github.example and fill them in (never committed).
-
-x-diffmap: &diffmap
-  build: .
-  image: diffmap:latest
-  restart: unless-stopped
-  # If the code host is on your LAN under a name the container can't resolve:
-  # extra_hosts:
-  #   - "gitlab.lan:192.168.1.10"
+# One diffmap for one code host (GitLab or GitHub, set by CODE_HOST in .env):
+#   cp .env.example .env      # fill it in (never committed)
+#   docker compose up -d --build
+#
+# Want both GitLab and GitHub? Run a second copy with its own settings file,
+# port and project name (its data volume is separate too):
+#   DIFFMAP_ENV=.env.github DIFFMAP_PORT=8081 docker compose -p diffmap-github up -d
 
 services:
-  diffmap-gitlab:
-    <<: *diffmap
+  diffmap:
+    build: .
+    image: diffmap:latest
+    restart: unless-stopped
     ports:
-      - "8080:8080"
-    environment:
-      CODE_HOST: gitlab
+      - "${DIFFMAP_PORT:-8080}:8080"
     env_file:
-      - path: .env.gitlab
+      - path: ${DIFFMAP_ENV:-.env}
         required: false
     volumes:
-      - diffmap-gitlab-data:/data
-      # If GitLab uses an internal CA, mount it and set the CA paths in .env.gitlab:
+      - diffmap-data:/data
+      # If the host uses an internal CA, mount it and set the CA paths in .env:
       # - ./certs:/certs:ro
-
-  diffmap-github:
-    <<: *diffmap
-    ports:
-      - "8081:8080"
-    environment:
-      CODE_HOST: github
-    env_file:
-      - path: .env.github
-        required: false
-    volumes:
-      - diffmap-github-data:/data
+    # If the code host is on your LAN under a name the container can't resolve:
+    # extra_hosts:
+    #   - "gitlab.lan:192.168.1.10"
 
 volumes:
-  diffmap-gitlab-data:
-  diffmap-github-data:
+  diffmap-data:
