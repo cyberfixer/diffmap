@@ -67,7 +67,8 @@ describe("exact calls from an index", () => {
   const A = (body: string) => `class A implements P {\n  public void update() {\n    ${body}\n  }\n}\n`;
   const B = (body: string) => `class B {\n  void update() {\n    ${body}\n  }\n}\n`;
   // The variable's type isn't written down, so only a compiler (the index) knows it is an A.
-  const USE = "class Use {\n  void run() {\n    var a = Factory.make();\n    a.update();\n  }\n}\n";
+  // `a` has no written-down type, so name matching can't tell A.update from B.update.
+  const USE = "class Use {\n  void run() {\n    Factory.each(a ->\n    a.update());\n  }\n}\n";
 
   // What scip-java would write for the new code: Use.run calls A.update, A.update implements P.update.
   const scip = index(
@@ -107,7 +108,7 @@ describe("exact calls from an index", () => {
     expect(into(r, "A.java#A.update")).toEqual(["calls Use.java#Use.run"]);
     expect(into(r, "B.java#B.update")).toEqual([]);
     expect(into(r, "P.java#P.update")).toEqual(["implements A.java#A.update"]);
-    expect(r.edges.find((e) => e.to === "A.java#A.update")!.sites).toEqual([{ line: 4, text: "    a.update();" }]);
+    expect(r.edges.find((e) => e.to === "A.java#A.update")!.sites).toEqual([{ line: 4, text: "    a.update());" }]);
     expect(r.exactness).toEqual({ exact: 3, total: 3 });
   });
 });

@@ -26,13 +26,19 @@ export interface Outline {
   symbols: SymbolInfo[];
   calls: FoundCall[];
   parents: TypeParents[];
+  /** Declared return types by qualified symbol name (`Repo.find` -> "Order"). */
+  returns: Record<string, string>;
 }
 
 const SELF = /^(this|self|\$this|@|Self|super)$/;
 
-/** The text before the called name: `self.repo.find(x)` -> "self.repo", `new Svc()` -> "". */
+/**
+ * The text before the called name: `self.repo.find(x)` -> "self.repo", `new Svc()` -> "",
+ * `a.getB().run(x)` -> "a.getB()". Pass the call without its own arguments when
+ * possible (see calleeText); spaces and line breaks in chains are dropped.
+ */
 export function receiverOf(callText: string, name: string): string {
-  const head = callText.split("(")[0];
+  const head = callText.replace(/\s*\n\s*/g, "").replace(/\s*(\?\.|\.|->|::)\s*/g, "$1");
   const at = head.lastIndexOf(name);
   if (at < 0) return "";
   const r = head
@@ -91,9 +97,10 @@ export class TreeSitterEngine {
     return (
       this.with(path, source, (root, spec) => {
         const parents: TypeParents[] = [];
-        const found = listSymbols(root, spec, parents);
-        return { symbols: found.map((s) => s.info), calls: listCalls(root, spec, found), parents };
-      }) ?? { symbols: [], calls: [], parents: [] }
+        const returns: Record<string, string> = {};
+        const found = listSymbols(root, spec, parents, returns);
+        return { symbols: found.map((s) => s.info), calls: listCalls(root, spec, found), parents, returns };
+      }) ?? { symbols: [], calls: [], parents: [], returns: {} }
     );
   }
 }
@@ -107,7 +114,7 @@ interface Found {
 const endLine = (n: Node): number =>
   n.endPosition.column === 0 && n.endPosition.row > n.startPosition.row ? n.endPosition.row : n.endPosition.row + 1;
 
-function listSymbols(root: Node, spec: LanguageSpec, parents: TypeParents[] = []): Found[] {
+function listSymbols(root: Node, spec: LanguageSpec, parents: TypeParents[] = [], returns: Record<string, string> = {}): Found[] {
   const out: Found[] = [];
   const walk = (node: Node, prefix: string[], inType: boolean): void => {
     let nextPrefix = prefix;
@@ -122,6 +129,8 @@ function listSymbols(root: Node, spec: LanguageSpec, parents: TypeParents[] = []
         const qualified = [...prefix, name].join(".");
         const containerOnly = typeof rule.containerOnly === "function" ? rule.containerOnly(node) : !!rule.containerOnly;
         if (!containerOnly) {
+          const returned = rule.returns?.(node);
+          if (returned && !(qualified in returns)) returns[qualified] = returned;
           const last = rule.extendTo?.(node) ?? node;
           out.push({
             info: { name: qualified, kind, range: { start: node.startPosition.row + 1, end: endLine(last) } },
@@ -141,6 +150,17 @@ function listSymbols(root: Node, spec: LanguageSpec, parents: TypeParents[] = []
   return out;
 }
 
+const ARGUMENTS = /^(argument_list|arguments|call_suffix|value_arguments)$/;
+
+/** A call's text without its own argument list: `a.getB().run(x)` -> "a.getB().run". */
+function calleeText(call: Node): string {
+  const kids = call.children;
+  for (let i = kids.length - 1; i >= 0; i--) {
+    if (ARGUMENTS.test(kids[i].type)) return call.text.slice(0, kids[i].startIndex - call.startIndex);
+  }
+  return call.text;
+}
+
 function listCalls(root: Node, spec: LanguageSpec, symbols: Found[]): FoundCall[] {
   const out: FoundCall[] = [];
   const walk = (node: Node): void => {
@@ -153,7 +173,7 @@ function listCalls(root: Node, spec: LanguageSpec, symbols: Found[]): FoundCall[
         if (s.start <= node.startIndex && node.endIndex <= s.end && (!best || s.end - s.start < best.end - best.start)) best = s;
       }
       if (name && best) {
-        out.push({ from: best.info.name, name, line: node.startPosition.row + 1, receiver: receiverOf(node.text, name) });
+        out.push({ from: best.info.name, name, line: node.startPosition.row + 1, receiver: receiverOf(calleeText(node), name) });
       }
     }
     for (const child of node.namedChildren) walk(child);

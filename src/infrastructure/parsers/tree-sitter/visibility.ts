@@ -50,7 +50,7 @@ const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
  * `svc Svc` / `svc *pkg.Svc` (Go fields and parameters), `@svc = Svc.new` (Ruby).
  */
 export function typeOfVariable(variable: string, code: string): string | null {
-  const v = escape(variable.replace(/^[$@]/, ""));
+  const v = escape(variable.replace(/^[$@]/, "")) + "`?"; // Swift: let `default` = ...
   const patterns = [
     new RegExp(`\\b([A-Z][\\w]*)(?:<[^>]*>)?[*&\\s]+\\$?${v}\\b\\s*[=;,)]`), // Svc svc = / (Svc svc)
     new RegExp(`\\$?\\b${v}\\s*:\\s*(?:&\\s*(?:mut\\s+)?)?\\*?([A-Z][\\w]*)`), // svc: Svc

@@ -20,28 +20,31 @@ There are two ways to use it:
 |---|---|---|---|---|
 | TypeScript | everything | **exact** (TypeScript compiler) | — | — |
 | JavaScript | functions, classes, methods, arrow functions | matched by name | ✅ scip-typescript | — |
-| Java | classes, records, interfaces, enums, methods, constructors, method references | matched by name | ✅ scip-java | return types, overloads, imports |
-| Kotlin | classes, interfaces, enums, objects, functions, constructors, properties with a getter | matched by name | ✅ scip-java | return types |
-| Swift | classes, structs, enums, protocols and their methods, extensions, functions, `init`, computed properties, subscripts | matched by name | — | return types |
-| C# | classes, records, structs, interfaces, enums, methods, constructors, properties with code | matched by name | — | return types, overloads |
-| Scala | classes, objects, traits, functions | matched by name | — | return types |
-| Go | functions, methods, structs, interfaces | matched by name | — | return types |
-| Rust | functions, structs, enums, traits, impl blocks | matched by name | — | return types |
-| C++ | functions, classes, structs, namespaces | matched by name | ✅ scip-clang | return types |
-| C | functions, structs | matched by name | ✅ scip-clang | return types |
+| Java | classes, records, interfaces, enums, methods, constructors, method references | matched by name | ✅ scip-java | overloads, imports |
+| Kotlin | classes, interfaces, enums, objects, functions, constructors, properties with a getter | matched by name | ✅ scip-java | — |
+| Swift | classes, structs, enums, protocols and their methods, extensions, functions, `init`, computed properties, subscripts | matched by name | — | — |
+| C# | classes, records, structs, interfaces, enums, methods, constructors, properties with code | matched by name | — | overloads |
+| Scala | classes, objects, traits, functions | matched by name | — | — |
+| Go | functions, methods, structs, interfaces | matched by name | — | — |
+| Rust | functions, structs, enums, traits, impl blocks | matched by name | — | — |
+| C++ | functions, classes, structs, namespaces | matched by name | ✅ scip-clang | — |
+| C | functions, structs | matched by name | ✅ scip-clang | — |
 | Python | functions, classes | matched by name | — | — |
 | PHP | classes, interfaces, traits, enums, methods, functions | matched by name | — | — |
 | Ruby | classes, modules, methods | matched by name | — | — |
 | Angular templates | components, directives, pipes | [linked from templates](#angular) | — | — |
 | Anything else (YAML, SQL, Markdown…) | shown as plain diff cards | — | — | — |
 
-"Planned" improves name matching without a compiler: use declared return types
-(`var o = repo.find()`), and pick overloads by argument count.
+"Planned" improves name matching without a compiler: pick overloads by argument
+count, and the right class when two share a name.
 
 "Matched by name" means a call to `update()` links to a function called `update`
 that the calling code can reach: `self.update()` / `this.update()` → the same
 class; `Svc.update()` or a variable whose type is written down (in the method,
 or on a field, property or constructor parameter of its class) → that class;
+the same through calls and fields, using declared return types
+(`var o = repo.find(id); o.total()`, `repo.find(id).total()`);
+calls on a library type (`items.add()`) are left out;
 a method the class inherits → the parent that declares it; otherwise the same
 file, then files it imports or shares a folder with. A method that implements an
 interface, protocol or trait method (or overrides a parent's) gets an

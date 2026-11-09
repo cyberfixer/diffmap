@@ -18,6 +18,8 @@ export interface DefRule {
   extendTo?: (n: Node) => Node | null;
   /** Names of the types this one extends or implements (`class A extends B implements C` -> B, C). */
   supers?: (n: Node) => string[];
+  /** The declared return type of a function or method (`Order find()` -> "Order"). */
+  returns?: (n: Node) => string | null;
 }
 
 /** How to find the called name in one kind of call node. */
@@ -86,6 +88,29 @@ const parentsIn =
     return out;
   };
 
+/** The type a node names: its first capitalised name outside generic arguments (`*Order`, `Order?`, `(Order, error)` -> Order). */
+function typeName(n: Node | null): string | null {
+  if (!n || NOT_A_PARENT.test(n.type)) return null;
+  if (n.namedChildCount === 0) return /^[A-Z]\w*$/.test(n.text) ? n.text : null;
+  for (const c of n.namedChildren) {
+    const found = typeName(c);
+    if (found) return found;
+  }
+  return null;
+}
+
+/** Return type in a field: `type` (Java, C#, C++), `return_type` (Rust, Scala, Python, PHP), `result` (Go). */
+const returnsIn = (f: string) => (n: Node) => typeName(n.childForFieldName(f));
+
+/** Return type written after a token: `-> Order` (Swift), `): Order` (Kotlin). */
+const returnsAfter = (token: string) => (n: Node) => {
+  const kids = n.children;
+  const at = kids.findIndex((c) => c.type === token);
+  if (at < 0) return null;
+  const t = kids.slice(at + 1).find((c) => c.isNamed && !/body|block/.test(c.type));
+  return typeName(t ?? null);
+};
+
 /** True when the node has this keyword as a direct child (Kotlin `interface X`, `enum class X`). */
 const keyword = (n: Node, word: string) => n.children.some((c) => c.type === word);
 
@@ -119,7 +144,7 @@ export const LANGUAGES: LanguageSpec[] = [
     id: "python",
     extensions: [".py"],
     defs: {
-      function_definition: { kind: "function" },
+      function_definition: { kind: "function", returns: returnsIn("return_type") },
       class_definition: { kind: "class", supers: parentsIn("argument_list") }, // class A(Base, Mixin)
     },
     calls: { call: field("function") },
@@ -132,7 +157,7 @@ export const LANGUAGES: LanguageSpec[] = [
       record_declaration: { kind: "class", supers: parentsIn("super_interfaces") },
       interface_declaration: { kind: "interface", supers: parentsIn("extends_interfaces") },
       enum_declaration: { kind: "enum", supers: parentsIn("super_interfaces") },
-      method_declaration: { kind: "method" },
+      method_declaration: { kind: "method", returns: returnsIn("type") },
       constructor_declaration: { kind: "method" },
     },
     calls: {
@@ -146,9 +171,10 @@ export const LANGUAGES: LanguageSpec[] = [
     id: "go",
     extensions: [".go"],
     defs: {
-      function_declaration: { kind: "function" },
+      function_declaration: { kind: "function", returns: returnsIn("result") },
       method_declaration: {
         kind: "method",
+        returns: returnsIn("result"),
         // func (s *Svc) Update() -> "Svc.Update"
         name: (n) => {
           const recv = n.childForFieldName("receiver");
@@ -175,9 +201,9 @@ export const LANGUAGES: LanguageSpec[] = [
       interface_declaration: { kind: "interface", supers: parentsIn("base_list") },
       enum_declaration: { kind: "enum" },
       namespace_declaration: { kind: "module", containerOnly: true },
-      method_declaration: { kind: "method" },
+      method_declaration: { kind: "method", returns: returnsIn("type") },
       constructor_declaration: { kind: "method" },
-      local_function_statement: { kind: "function" },
+      local_function_statement: { kind: "function", returns: returnsIn("type") },
       // int Total { get { ... } } / int Fast => ...; (not `{ get; set; }`)
       property_declaration: {
         kind: "method",
@@ -196,8 +222,8 @@ export const LANGUAGES: LanguageSpec[] = [
       interface_declaration: { kind: "interface", supers: parentsIn("base_clause") },
       trait_declaration: { kind: "trait" },
       enum_declaration: { kind: "enum" },
-      method_declaration: { kind: "method" },
-      function_definition: { kind: "function" },
+      method_declaration: { kind: "method", returns: returnsIn("return_type") },
+      function_definition: { kind: "function", returns: returnsIn("return_type") },
     },
     calls: {
       function_call_expression: field("function"),
@@ -228,8 +254,8 @@ export const LANGUAGES: LanguageSpec[] = [
     id: "rust",
     extensions: [".rs"],
     defs: {
-      function_item: { kind: "function" },
-      function_signature_item: { kind: "method" },
+      function_item: { kind: "function", returns: returnsIn("return_type") },
+      function_signature_item: { kind: "method", returns: returnsIn("return_type") },
       struct_item: { kind: "struct" },
       enum_item: { kind: "enum" },
       trait_item: { kind: "trait" },
@@ -258,7 +284,7 @@ export const LANGUAGES: LanguageSpec[] = [
         supers: parentsIn("delegation_specifier", "delegation_specifiers"),
       },
       object_declaration: { kind: "module", name: firstIdent, supers: parentsIn("delegation_specifier", "delegation_specifiers") },
-      function_declaration: { kind: "function", name: firstIdent },
+      function_declaration: { kind: "function", name: firstIdent, returns: returnsAfter(":") },
       secondary_constructor: { kind: "method", name: () => "constructor" },
       // val total: Int get() = ... (a property with code)
       property_declaration: {
@@ -289,8 +315,8 @@ export const LANGUAGES: LanguageSpec[] = [
         supers: parentsIn("inheritance_specifier"),
       },
       protocol_declaration: { kind: "interface", supers: parentsIn("inheritance_specifier") },
-      function_declaration: { kind: "function" },
-      protocol_function_declaration: { kind: "method" },
+      function_declaration: { kind: "function", returns: returnsAfter("->") },
+      protocol_function_declaration: { kind: "method", returns: returnsAfter("->") },
       init_declaration: { kind: "method", name: () => "init" },
       deinit_declaration: { kind: "method", name: () => "deinit" },
       subscript_declaration: { kind: "method", name: () => "subscript" },
@@ -310,7 +336,7 @@ export const LANGUAGES: LanguageSpec[] = [
       class_definition: { kind: "class", supers: parentsIn("extends_clause") },
       object_definition: { kind: "module", supers: parentsIn("extends_clause") },
       trait_definition: { kind: "trait", supers: parentsIn("extends_clause") },
-      function_definition: { kind: "function" },
+      function_definition: { kind: "function", returns: returnsIn("return_type") },
     },
     calls: { call_expression: field("function"), instance_expression: firstChild },
   },
@@ -318,7 +344,7 @@ export const LANGUAGES: LanguageSpec[] = [
     id: "c",
     extensions: [".c", ".h"],
     defs: {
-      function_definition: { kind: "function", name: declaratorName },
+      function_definition: { kind: "function", name: declaratorName, returns: returnsIn("type") },
       struct_specifier: { kind: "struct", when: hasBody },
     },
     calls: { call_expression: field("function") },
@@ -327,7 +353,7 @@ export const LANGUAGES: LanguageSpec[] = [
     id: "cpp",
     extensions: [".cpp", ".cc", ".cxx", ".hpp", ".hh", ".hxx"],
     defs: {
-      function_definition: { kind: "function", name: declaratorName },
+      function_definition: { kind: "function", name: declaratorName, returns: returnsIn("type") },
       class_specifier: { kind: "class", when: hasBody, supers: parentsIn("base_class_clause") },
       struct_specifier: { kind: "struct", when: hasBody, supers: parentsIn("base_class_clause") },
       namespace_definition: { kind: "module", containerOnly: true },

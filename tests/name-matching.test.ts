@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import { TreeSitterEngine, receiverOf } from "../src/infrastructure/parsers/tree-sitter/engine.js";
-import { TreeSitterCallGraph } from "../src/infrastructure/parsers/tree-sitter/tree-sitter-call-graph.js";
+import { TreeSitterCallGraph, lastAccess, assignedExpr } from "../src/infrastructure/parsers/tree-sitter/tree-sitter-call-graph.js";
 import { Visibility, typeOfVariable } from "../src/infrastructure/parsers/tree-sitter/visibility.js";
 
 let graph: TreeSitterCallGraph;
@@ -279,5 +279,80 @@ describe("interfaces and implementations (roadmap 22.3)", () => {
       "app/Use.java": "class Use {\n  private OrderRepo repo;\n  void go() { repo.findById(1); }\n}\n",
     };
     expect(callersOf(files, "app/Cache.java#Cache.findById")).toEqual([]);
+  });
+});
+
+describe("return types and chains (roadmap 22.4)", () => {
+  const repoAndCache = {
+    "app/Order.java": "class Order {\n  int total() { return 1; }\n}\n",
+    "app/Invoice.java": "class Invoice {\n  int total() { return 2; }\n}\n",
+    "app/Repo.java": "class Repo {\n  Order find(int id) { return null; }\n  Invoice bill(int id) { return null; }\n}\n",
+  };
+
+  it("Java: var o = repo.find(id); o.total() and repo.find(id).total()", () => {
+    const files = {
+      ...repoAndCache,
+      "app/Use.java":
+        "class Use {\n  private Repo repo;\n  int a() { var o = repo.find(1); return o.total(); }\n  int b() { return repo.find(1).total(); }\n  int c() { return this.repo.bill(1).total(); }\n}\n",
+    };
+    expect(callersOf(files, "app/Order.java#Order.total")).toEqual(["app/Use.java#Use.a", "app/Use.java#Use.b"]);
+    expect(callersOf(files, "app/Invoice.java#Invoice.total")).toEqual(["app/Use.java#Use.c"]);
+  });
+
+  it("Swift: let o = try await repo.find(); chains over lines; -> Self", () => {
+    const files = {
+      "app/Order.swift": "struct Order {\n  func total() -> Int { 1 }\n}\n",
+      "app/Invoice.swift": "struct Invoice {\n  func total() -> Int { 2 }\n}\n",
+      "app/Repo.swift": "class Repo {\n  func find() async throws -> Order? { nil }\n  func validate() -> Self { self }\n}\n",
+      "app/Use.swift":
+        "class Use {\n  let repo = Repo()\n  func a() async throws {\n    let o = try await repo.find()\n    o?.total()\n  }\n  func b() {\n    repo.validate()\n      .find()\n      .total()\n  }\n}\n",
+    };
+    expect(callersOf(files, "app/Order.swift#Order.total")).toEqual(["app/Use.swift#Use.a", "app/Use.swift#Use.b"]);
+    expect(callersOf(files, "app/Invoice.swift#Invoice.total")).toEqual([]);
+  });
+
+  it("Go: o, err := svc.Load(); o.Total()", () => {
+    const files = {
+      "app/types.go": "package app\n\ntype Order struct{}\n\nfunc (o *Order) Total() int { return 1 }\n\ntype Invoice struct{}\n\nfunc (i *Invoice) Total() int { return 2 }\n\ntype Svc struct{}\n\nfunc (s *Svc) Load() (*Order, error) { return nil, nil }\n",
+      "app/use.go": "package app\n\nfunc run(svc *Svc) {\n\to, err := svc.Load()\n\to.Total()\n}\n",
+    };
+    expect(callersOf(files, "app/types.go#Order.Total")).toEqual(["app/use.go#run"]);
+    expect(callersOf(files, "app/types.go#Invoice.Total")).toEqual([]);
+  });
+
+  it("a value from a library function is a library type; a library method's result is unknown", () => {
+    const files = {
+      "app/Box.swift": "class Box {\n  func fulfill() {}\n}\n",
+      "app/Use.swift": "class Use {\n  func a() {\n    let e = expectation(description: \"x\")\n    e.fulfill()\n  }\n}\n",
+    };
+    expect(callersOf(files, "app/Box.swift#Box.fulfill")).toEqual([]);
+    const java = {
+      ...repoAndCache,
+      "app/Use.java": "class Use {\n  void a(List<Order> items) { items.get(0).total(); }\n}\n",
+    };
+    // items.get(0) could be anything: name matching still links (to both, as before).
+    expect(callersOf(java, "app/Order.java#Order.total")).toEqual(["app/Use.java#Use.a"]);
+  });
+
+  it("a global: let AF = Session.default; AF.request()", () => {
+    const files = {
+      "app/Session.swift": "class Session {\n  static let `default` = Session()\n  func request() {}\n}\n",
+      "app/Other.swift": "class Other {\n  func request() {}\n}\n",
+      "app/AF.swift": "public let AF = Session.default\n",
+      "app/Use.swift": "class Use {\n  func a() { AF.request() }\n}\n",
+    };
+    expect(callersOf(files, "app/Session.swift#Session.request")).toEqual(["app/Use.swift#Use.a"]);
+    expect(callersOf(files, "app/Other.swift#Other.request")).toEqual([]);
+  });
+
+  it("lastAccess and assignedExpr", () => {
+    expect(lastAccess("a.getB().run(x)")).toEqual({ recv: "a.getB()", name: "run", isCall: true });
+    expect(lastAccess("$a->b")).toEqual({ recv: "$a", name: "b", isCall: false });
+    expect(lastAccess("repo")).toEqual({ recv: "", name: "repo", isCall: false });
+    expect(lastAccess("o?.total")).toEqual({ recv: "o", name: "total", isCall: false });
+    expect(assignedExpr("o", "var o = repo.find(1, 2);")).toBe("repo.find(1, 2)");
+    expect(assignedExpr("o", "o, err := svc.Load()")).toBe("svc.Load()");
+    expect(assignedExpr("o", "guard let o = try await api.load() else {")).toBe("api.load()");
+    expect(assignedExpr("o", "if (o == null) {")).toBeNull();
   });
 });

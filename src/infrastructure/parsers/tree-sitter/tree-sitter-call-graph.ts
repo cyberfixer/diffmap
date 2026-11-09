@@ -11,6 +11,15 @@ const simple = (name: string): string => name.split(".").pop()!;
 const owner = (name: string): string => name.split(".").slice(0, -1).join(".");
 const ownerSimple = (name: string): string => simple(owner(name) || "");
 
+export type LinkOutcome = "external" | "libraryType" | "unreachable" | "one" | "several" | "tooMany";
+
+/** One call and how it was linked (for measuring the matching rules). */
+export interface LinkedCall extends FoundCall {
+  file: string;
+  outcome: LinkOutcome;
+  targets: string[];
+}
+
 /** How each call in the repo was linked (for measuring the matching rules). */
 export interface LinkStats {
   calls: number;
@@ -48,16 +57,18 @@ export class TreeSitterCallGraph implements CallGraphPort {
   }
 
   /** Every symbol in the files and every call between them, plus how each call was linked. */
-  link(files: CallGraphInput["files"], removed: CallGraphInput["removed"] = []) {
+  link(files: CallGraphInput["files"], removed: CallGraphInput["removed"] = [], onCall?: (c: LinkedCall) => void) {
     const meta = new Map<string, GraphNode>();
     const linesOf = new Map<string, string[]>();
     const byName = new Map<string, string[]>();
     const calls: (FoundCall & { file: string })[] = [];
     const typeParents: (TypeParents & { file: string })[] = [];
+    const returns = new Map<string, string>(); // symbol id -> declared return type
 
     for (const f of files) {
-      const { symbols, calls: found, parents } = this.engine.outline(f.path, f.source);
+      const { symbols, calls: found, parents, returns: rets } = this.engine.outline(f.path, f.source);
       for (const p of parents) typeParents.push({ file: f.path, ...p });
+      for (const [name, type] of Object.entries(rets)) returns.set(`${f.path}#${name}`, type);
       linesOf.set(f.path, f.source.split("\n").map((l) => l.replace(/\r$/, "")));
       for (const s of symbols) {
         const id = `${f.path}#${s.name}`;
@@ -69,7 +80,7 @@ export class TreeSitterCallGraph implements CallGraphPort {
       for (const c of found) calls.push({ file: f.path, ...c });
     }
     const visibility = new Visibility(files);
-    const scope = new TypeScope(meta, linesOf, visibility, typeParents);
+    const scope = new TypeScope(meta, linesOf, visibility, typeParents, returns);
 
     const removedByName = new Map<string, string[]>();
     for (const r of removed) {
@@ -85,13 +96,16 @@ export class TreeSitterCallGraph implements CallGraphPort {
       const all = (byName.get(c.name) ?? []).filter((id) => id !== from);
       const narrowed = this.narrow(all, c, from, meta, scope, visibility);
       const targets = narrowed ?? [];
+      const outcome: LinkOutcome =
+        all.length === 0 ? "external"
+        : narrowed === null ? "libraryType"
+        : targets.length === 0 ? "unreachable"
+        : targets.length === 1 ? "one"
+        : targets.length <= MAX_TARGETS ? "several"
+        : "tooMany";
       stats.calls++;
-      if (all.length === 0) stats.external++;
-      else if (narrowed === null) stats.libraryType++;
-      else if (targets.length === 0) stats.unreachable++;
-      else if (targets.length === 1) stats.one++;
-      else if (targets.length <= MAX_TARGETS) stats.several++;
-      else stats.tooMany++;
+      stats[outcome]++;
+      onCall?.({ ...c, outcome, targets });
       if (targets.length > 0 && targets.length <= MAX_TARGETS) {
         for (const to of targets) collector.add(from, to, "calls", c.line, text);
       } else if (all.length === 0) {
@@ -173,9 +187,8 @@ export class TreeSitterCallGraph implements CallGraphPort {
     }
 
     // Svc.x() or v.x() where v's type is written down: that class's x
-    const lastPart = receiver.split(/\.|->|::/).pop() ?? "";
-    let typeName: string | null = /^[A-Z]/.test(lastPart) ? lastPart : null;
-    if (!typeName && /^[$@]?[A-Za-z_]\w*$/.test(receiver) && caller) typeName = scope.typeOf(receiver, caller);
+    // ...also through calls and fields: repo.find(id).total() -> find's return type
+    const typeName = receiver && caller ? scope.typeOfExpr(receiver, caller) : null;
     if (typeName) {
       // A type the repo doesn't define (String, List, a library class): not a call into repo code.
       if (!scope.isRepoType(typeName)) return null;
@@ -184,6 +197,9 @@ export class TreeSitterCallGraph implements CallGraphPort {
       // Not declared on that type: a method it inherits.
       const inherited = scope.inAncestors(all, typeName, c.file);
       if (inherited.length) return inherited;
+      // ...or one a subclass adds (`request.responseString()` on a Request, declared on DataRequest).
+      const sub = all.filter((id) => scope.ancestorsOf(ownerSimple(node(id).name)).includes(typeName));
+      if (sub.length) return sub;
       // ...or one it inherits from a library type (`interface OrderRepo extends JpaRepository`).
       if (scope.ancestorsOf(typeName).some((a) => !scope.isRepoType(a))) return null;
     }
@@ -217,12 +233,16 @@ class TypeScope {
   /** Parent type names by type name (simple names; several declarations merge). */
   private readonly parents = new Map<string, string[]>();
   private readonly ancestorCache = new Map<string, string[]>();
+  private readonly symbolsByName = new Map<string, GraphNode[]>();
+  private readonly exprCache = new Map<string, string | null>();
+  private globals: Map<string, { file: string; line: number; text: string }> | null = null;
 
   constructor(
     private readonly meta: Map<string, GraphNode>,
     private readonly linesOf: Map<string, string[]>,
     private readonly visibility: Visibility,
     typeParents: { type: string; parents: string[] }[] = [],
+    private readonly returns = new Map<string, string>(),
   ) {
     for (const t of typeParents) {
       const key = simple(t.type);
@@ -236,6 +256,8 @@ class TypeScope {
       }
       const cls = owner(n.name);
       if (cls) this.repoTypes.add(simple(cls));
+      const key = simple(n.name);
+      this.symbolsByName.set(key, [...(this.symbolsByName.get(key) ?? []), n]);
       // Constructors stay: Python, Ruby, JS and PHP set their fields there (`self.repo = Repo()`).
       if (cls && !CONSTRUCTORS.has(simple(n.name)) && simple(n.name) !== simple(cls)) {
         const key = `${n.file}#${cls}`;
@@ -278,21 +300,130 @@ class TypeScope {
     return this.repoTypes.has(name);
   }
 
-  /** `this.repo` / `self.repo` / `$this->repo` / `@repo` -> "repo"; Go's `s` in `func (s *Svc)` -> "self". */
+  /** Ruby's `@repo` -> "self.repo"; Go's `s` in `func (s *Svc)` -> "self" (`s.repo` -> "self.repo"). */
   plainReceiver(receiver: string, caller: GraphNode): string {
-    let r = receiver.replace(/^(?:this|self|\$this)\s*(?:\.|->)\s*/, "").replace(/^@(?=\w)/, "");
+    let r = receiver.replace(/^@(?=\w)/, "self.");
     const head = /^(\w+)(?:\.|$)/.exec(r)?.[1];
     if (head && caller.kind === "method") {
       const first = this.linesOf.get(caller.file)?.[caller.line - 1] ?? "";
-      if (new RegExp(`^\\s*func\\s*\\(\\s*${head}\\s+\\*?[A-Z]`).test(first)) r = r === head ? "self" : r.slice(head.length + 1);
+      if (new RegExp(`^\\s*func\\s*\\(\\s*${head}\\s+\\*?[A-Z]`).test(first)) r = "self" + r.slice(head.length);
     }
     return r;
   }
 
-  typeOf(variable: string, caller: GraphNode): string | null {
+  /**
+   * The type of an expression a call is made on, or null when unknown:
+   * `repo` (a variable, field or parameter), `Svc` (a type), `Svc(x)` / `new Svc()`,
+   * `repo.find(id)` (find's declared return type), `a.b` (field b of a's type),
+   * at most a few steps deep. A type the repo doesn't define comes back as is
+   * (or as LIBRARY), so the caller can tell a library call from an unknown one.
+   */
+  typeOfExpr(expr: string, caller: GraphNode, depth = 0): string | null {
+    const e = expr
+      .trim()
+      .replace(/^(?:(?:try[?!]?|await)\s+)+/, "")
+      .replace(/^new\s+/, "")
+      .replace(/[!?]+$/, "");
+    if (!e || depth > 3) return null;
+    const key = `${caller.id}>${e}`;
+    if (this.exprCache.has(key)) return this.exprCache.get(key)!;
+    this.exprCache.set(key, null); // guards against `x = x.next()` loops
+    const found = this.resolveExpr(e, caller, depth);
+    this.exprCache.set(key, found);
+    return found;
+  }
+
+  private resolveExpr(e: string, caller: GraphNode, depth: number): string | null {
+    if (/^(this|self|\$this|Self)$/.test(e)) return owner(caller.name) ? simple(owner(caller.name)) : null;
+    const part = lastAccess(e);
+    if (!part) return null;
+    const { recv, name, isCall } = part;
+    if (!recv) {
+      if (/^[A-Z]/.test(name)) {
+        if (isCall || this.isRepoType(name)) return name; // Svc(x), or Svc.x()
+        return this.globalType(name, caller, depth) ?? name; // AF.request(): a global, else a library type
+      }
+      if (isCall) return this.returnOfFunction(name, caller);
+      return this.typeOf(name, caller, depth);
+    }
+    const t = this.typeOfExpr(recv, caller, depth + 1);
+    // On a library type the result is unknown, not "library": items.get(0) may well be a repo type.
+    if (!t || !this.isRepoType(t)) return null;
+    if (isCall) return this.returnOfMethod(t, name);
+    if (/^[A-Z]/.test(name)) return name; // Outer.Inner
+    return this.fieldOfType(t, name);
+  }
+
+  /** Declared return type of `name` on a type or its parents; LIBRARY when only a library parent can have it. */
+  private returnOfMethod(type: string, name: string): string | null {
+    for (const t of [type, ...this.ancestorsOf(type)]) {
+      const methods = (this.symbolsByName.get(name) ?? []).filter((m) => ownerSimple(m.name) === t);
+      if (methods.length) {
+        const r = methods.map((m) => this.returns.get(m.id)).find((x) => x) ?? null;
+        return r === "Self" ? type : r; // Swift/Rust `-> Self`: the type it was called on
+      }
+    }
+    return null;
+  }
+
+  /** `find(id)` without a receiver: the caller's own class (and parents), else a function it can see. */
+  private returnOfFunction(name: string, caller: GraphNode): string | null {
+    const cls = owner(caller.name);
+    if (cls) {
+      const own = [simple(cls), ...this.ancestorsOf(simple(cls))];
+      const methods = (this.symbolsByName.get(name) ?? []).filter((m) => own.includes(ownerSimple(m.name)));
+      if (methods.length) return methods.map((m) => this.returns.get(m.id)).find((r) => r) ?? null;
+    }
+    const all = this.symbolsByName.get(name) ?? [];
+    if (!all.length) return LIBRARY; // expectation(...), make(...): not repo code
+    const local = all.filter((f) => f.file === caller.file);
+    const visible = local.length ? local : all.filter((f) => this.visibility.canSee(caller.file, f.file));
+    return (visible.length ? visible : all).map((f) => this.returns.get(f.id)).find((r) => r) ?? null;
+  }
+
+  /** The type of field `name` declared on a type (or its parents). */
+  private fieldOfType(type: string, name: string): string | null {
+    for (const t of [type, ...this.ancestorsOf(type)]) {
+      for (const decl of this.typesByName.get(t) ?? []) {
+        const found = this.fieldType(name, decl);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+
+  /** A top-level `let AF = Session.default` / `val API: Api = ...` anywhere in the repo. */
+  private globalType(name: string, caller: GraphNode, depth: number): string | null {
+    if (!this.globals) {
+      this.globals = new Map();
+      const decl = /^(?:(?:public|internal|private|fileprivate|static|final|open|export|const)\s+)*(?:let|var|val|const)\s+([A-Z]\w*)\b/;
+      for (const [file, lines] of this.linesOf) {
+        lines.forEach((text, i) => {
+          const m = decl.exec(text);
+          if (m && !this.globals!.has(m[1])) this.globals!.set(m[1], { file, line: i + 1, text });
+        });
+      }
+    }
+    const g = this.globals.get(name);
+    if (!g) return null;
+    const declared = typeOfVariable(name, g.text);
+    if (declared) return declared;
+    const rhs = assignedExpr(name, g.text);
+    const at: GraphNode = { id: `${g.file}#`, file: g.file, name: "", kind: "function", changed: false, line: g.line, endLine: g.line, labels: [] };
+    return rhs ? this.typeOfExpr(rhs, at, depth + 1) : null;
+  }
+
+  typeOf(variable: string, caller: GraphNode, depth = 0): string | null {
     const key = `${caller.id}>${variable}`;
     if (this.cache.has(key)) return this.cache.get(key)!;
-    let found = typeOfVariable(variable, this.code(caller));
+    this.cache.set(key, null);
+    const code = this.code(caller);
+    let found = typeOfVariable(variable, code);
+    // var o = repo.find(id) / o, err := svc.Load() / let o = try await api.load()
+    if (!found) {
+      const rhs = assignedExpr(variable, code);
+      if (rhs) found = this.typeOfExpr(rhs, caller, depth + 1);
+    }
     const cls = owner(caller.name);
     if (!found && cls) {
       const own = this.meta.get(`${caller.file}#${cls}`);
@@ -324,4 +455,60 @@ class TypeScope {
   private code(n: GraphNode): string {
     return (this.linesOf.get(n.file) ?? []).slice(n.line - 1, n.endLine ?? n.line).join("\n");
   }
+}
+
+/** Stands for "a type the repo doesn't define"; never a repo type name. */
+const LIBRARY = "<library>";
+
+/**
+ * The last step of an expression: `a.getB().run(x)` -> { recv: "a.getB()", name: "run", isCall: true },
+ * `repo` -> { recv: "", name: "repo", isCall: false }. Null when it is not a plain name or call.
+ */
+export function lastAccess(expr: string): { recv: string; name: string; isCall: boolean } | null {
+  let e = expr.trim();
+  let isCall = false;
+  if (e.endsWith(")")) {
+    let depth = 0;
+    let i = e.length - 1;
+    for (; i >= 0; i--) {
+      if (e[i] === ")") depth++;
+      else if (e[i] === "(" && --depth === 0) break;
+    }
+    if (i <= 0) return null;
+    e = e.slice(0, i).replace(/<[^<>()]*>$/, "").replace(/[!?]+$/, ""); // drop generic arguments: make<T>(…)
+    isCall = true;
+  }
+  let depth = 0;
+  for (let i = e.length - 1; i >= 0; i--) {
+    const ch = e[i];
+    if (ch === ")" || ch === "]") depth++;
+    else if (ch === "(" || ch === "[") depth--;
+    else if (depth === 0 && (ch === "." || (ch === ">" && e[i - 1] === "-") || (ch === ":" && e[i - 1] === ":"))) {
+      const name = e.slice(i + 1);
+      const recv = e.slice(0, ch === "." ? (e[i - 1] === "?" ? i - 1 : i) : i - 1).replace(/[!?]+$/, "");
+      return /^[$@]?\w+$/.test(name) ? { recv, name: name.replace(/^[$@]/, ""), isCall } : null;
+    }
+  }
+  return /^[$@]?\w+$/.test(e) ? { recv: "", name: e.replace(/^@/, ""), isCall } : null;
+}
+
+/**
+ * What a variable is set to: `var o = repo.find(id);` -> "repo.find(id)",
+ * `o, err := svc.Load()` -> "svc.Load()", `let o = try await api.load()` -> "api.load()".
+ * The first assignment in the code; the expression stops at the first space,
+ * comma or brace outside brackets.
+ */
+export function assignedExpr(variable: string, code: string): string | null {
+  const v = variable.replace(/^[$@]/, "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const m = new RegExp(`(?:^|[^\\w.$>])[$@]?${v}\\s*(?:,\\s*[$\\w]+\\s*)*(?::=|=(?![=>]))\\s*(?:(?:try[?!]?|await)\\s+)*([^\\n;]+)`, "m").exec(code);
+  if (!m) return null;
+  const rhs = m[1];
+  let depth = 0;
+  for (let i = 0; i < rhs.length; i++) {
+    const ch = rhs[i];
+    if (ch === "(" || ch === "[") depth++;
+    else if (ch === ")" || ch === "]") depth--;
+    else if (depth === 0 && (/[\s,;{]/.test(ch))) return rhs.slice(0, i) || null;
+  }
+  return rhs.trim() || null;
 }
