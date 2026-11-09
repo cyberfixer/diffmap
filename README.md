@@ -16,13 +16,29 @@ There are two ways to use it:
 
 ## Languages
 
-| Language | Functions & classes | Calls between them |
-|---|---|---|
-| TypeScript | ✅ | **exact** (TypeScript compiler) |
-| JavaScript, Java, Kotlin, C, C++ | ✅ | matched by name, **exact** with a [CI index](#exact-calls-from-ci) |
-| Python, Go, C#, PHP, Ruby, Rust, Swift, Scala | ✅ | matched by name |
-| Angular templates | ✅ | components, directives, pipes and methods [linked from templates](#angular) |
-| Anything else (YAML, SQL, Markdown…) | shown as plain diff cards | — |
+| Language | Finds | Calls | Exact with a [CI index](#exact-calls-from-ci) | Planned |
+|---|---|---|---|---|
+| TypeScript | everything | **exact** (TypeScript compiler) | — | — |
+| JavaScript | functions, classes, methods, arrow functions | matched by name | ✅ scip-typescript | — |
+| Java | classes, records, interfaces, enums, methods, constructors | matched by name | ✅ scip-java | field types, implements, return types, overloads, imports, method references |
+| Kotlin | classes, objects, functions | matched by name | ✅ scip-java | field types, implements, return types, constructors, properties |
+| Swift | classes, structs, enums, extensions, protocols, functions | matched by name | — | field types, implements, return types, `init`, protocol methods, computed properties |
+| C# | classes, records, structs, interfaces, enums, methods, constructors | matched by name | — | field types, implements, return types, overloads, properties |
+| Scala | classes, objects, traits, functions | matched by name | — | field types, implements, return types |
+| Go | functions, methods, structs, interfaces | matched by name | — | field types, return types |
+| Rust | functions, structs, enums, traits, impl blocks | matched by name | — | field types, return types, trait impls |
+| C++ | functions, classes, structs, namespaces | matched by name | ✅ scip-clang | field types, return types |
+| C | functions, structs | matched by name | ✅ scip-clang | return types |
+| Python | functions, classes | matched by name | — | field types (where type hints exist) |
+| PHP | classes, interfaces, traits, enums, methods, functions | matched by name | — | implements |
+| Ruby | classes, modules, methods | matched by name | — | — |
+| Angular templates | components, directives, pipes | [linked from templates](#angular) | — | — |
+| Anything else (YAML, SQL, Markdown…) | shown as plain diff cards | — | — | — |
+
+"Planned" improves name matching without a compiler: read the types of fields
+and properties (`private OrderRepo repo;`), link interfaces to the classes that
+implement them, use declared return types (`var o = repo.find()`), and pick
+overloads by argument count.
 
 "Matched by name" means a call to `update()` links to a function called `update`
 that the calling code can reach: `self.update()` / `this.update()` → the same
