@@ -15,6 +15,7 @@ export interface ServerConfig {
   publicUrl: string; // where this service is reached, e.g. https://map.company.com
   port: number;
   cacheDir: string; // where project git copies are kept
+  cacheMaxBytes: number; // above this, least recently used projects are removed
   dataDir: string; // "viewed" marks (and the repo cache by default)
   analysisWorkers: number; // analyses that may run at the same time
   indexJob: string; // CI job (GitLab) or artifact (GitHub Actions) with the exact index
@@ -53,8 +54,18 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ServerConfi
     port: Number(env.PORT ?? 8080),
     dataDir: env.DATA_DIR ?? "/data",
     cacheDir: env.CACHE_DIR ?? `${env.DATA_DIR ?? "/data"}/repos`,
+    cacheMaxBytes: gigabytes(env.CACHE_MAX_GB, 15),
     analysisWorkers: Math.max(1, Number(env.ANALYSIS_WORKERS ?? 2) || 2),
     indexJob: env.INDEX_JOB ?? "diffmap-index",
     indexArtifact: env.INDEX_ARTIFACT ?? "index.scip",
   };
+}
+
+/** A size in GB from the environment ("0" or "off" means no limit). */
+function gigabytes(value: string | undefined, fallback: number): number {
+  if (value === undefined || value.trim() === "") return fallback * 1024 ** 3;
+  if (/^(0|off|none)$/i.test(value.trim())) return Infinity;
+  const n = Number(value);
+  if (!(n > 0)) throw new Error(`CACHE_MAX_GB must be a number of GB (e.g. 15), or 0 for no limit; got "${value}".`);
+  return n * 1024 ** 3;
 }

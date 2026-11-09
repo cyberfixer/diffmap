@@ -50,7 +50,7 @@ const app = createApp({
     config.codeHost === "github"
       ? new GitHubClient(config.hostUrl, token, fetch, { name: config.indexJob, file: config.indexArtifact })
       : new GitLabClient(config.hostUrl, token, fetch, { name: config.indexJob, artifact: config.indexArtifact }),
-  review: new ReviewMergeRequestUseCase(new GitRepoCache(config.cacheDir), (gitDir, base, head, index) =>
+  review: new ReviewMergeRequestUseCase(new GitRepoCache(config.cacheDir, { maxBytes: config.cacheMaxBytes }), (gitDir, base, head, index) =>
     analyzer.analyze(gitDir, base, head, index),
   ),
   viewed: new FileViewedStore(`${config.dataDir}/viewed.json`),

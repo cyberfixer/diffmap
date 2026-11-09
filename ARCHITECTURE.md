@@ -258,7 +258,7 @@ one in GitLab, so it becomes a general comment that quotes `file:line` and the c
 | Data | Where | Lifetime |
 |---|---|---|
 | Sessions, GitLab tokens | memory of the server | until sign-out or restart |
-| Project code (bare git repos) | `CACHE_DIR` (default `/data/repos`) | kept; only new commits fetched |
+| Project code (bare git repos) | `CACHE_DIR` (default `/data/repos`) | only new commits fetched; least recently used projects removed above `CACHE_MAX_GB` (default 15); review refs older than 30 days dropped |
 | Analyses | memory, last 20 MR versions | until restart |
 | "Viewed" ticks on the service | `DATA_DIR/viewed.json`, per GitLab user and MR | kept |
 | "Viewed" ticks in a CLI report | the browser (localStorage) | per browser |

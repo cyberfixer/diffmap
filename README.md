@@ -182,6 +182,7 @@ For a second host, run it again with another name, port, volume and settings fil
 | `PORT` | Port inside the container (default `8080`) |
 | `DATA_DIR` | Where diffmap keeps its files (default `/data`; keep it on a volume) |
 | `CACHE_DIR` | Where project code is kept (default `$DATA_DIR/repos`) |
+| `CACHE_MAX_GB` | Disk limit for project code (default `15`, `0` = no limit). Above it, projects not opened for the longest time are removed; they download again when next opened |
 | `ANALYSIS_WORKERS` | Reviews analysed at the same time (default `2`; about one per CPU core is fine if memory allows) |
 | `INDEX_JOB`, `INDEX_ARTIFACT` | CI job (GitLab) or Actions artifact (GitHub) with the exact index (default `diffmap-index`, `index.scip`) |
 | `NODE_EXTRA_CA_CERTS`, `GIT_SSL_CAINFO` | Path to your CA file if the host uses an internal certificate |

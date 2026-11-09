@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { GitLabClient } from "../src/infrastructure/gitlab/gitlab-client.js";
@@ -244,6 +244,62 @@ describe("GitRepoCache", () => {
     expect(steps).toContain("Downloading the code (first time for this project)");
     // Second call is a no-op because both commits are present.
     expect(await cache.prepare(mr, "tok")).toBe(dir);
+  });
+
+  /** A fake project copy of `bytes` bytes, last used `ageMs` ago. */
+  function fakeRepo(name: string, bytes: number, ageMs: number, now: number) {
+    const dir = join(cacheDir!, name);
+    mkdirSync(join(dir, "objects"), { recursive: true });
+    writeFileSync(join(dir, "objects", "pack"), Buffer.alloc(bytes));
+    writeFileSync(join(dir, "diffmap-used"), "");
+    const t = (now - ageMs) / 1000;
+    utimesSync(join(dir, "diffmap-used"), t, t);
+  }
+
+  it("removes the least recently used projects until the cache fits its limit", async () => {
+    cacheDir = mkdtempSync(join(tmpdir(), "diffmap-cache-"));
+    const now = Date.now();
+    const day = 24 * 3600_000;
+    fakeRepo("old.git", 1000, 30 * day, now);
+    fakeRepo("older.git", 1000, 60 * day, now);
+    fakeRepo("new.git", 1000, 1 * day, now);
+    const cache = new GitRepoCache(cacheDir, { maxBytes: 2500 });
+
+    expect(await cache.trim(now)).toEqual(["older.git"]);
+    expect(existsSync(join(cacheDir, "old.git"))).toBe(true);
+    expect(existsSync(join(cacheDir, "new.git"))).toBe(true);
+    // Under the limit now: nothing more goes.
+    expect(await cache.trim(now)).toEqual([]);
+  });
+
+  it("never removes a project used in the last hour, even over the limit", async () => {
+    cacheDir = mkdtempSync(join(tmpdir(), "diffmap-cache-"));
+    const now = Date.now();
+    fakeRepo("busy.git", 5000, 10 * 60_000, now);
+    const cache = new GitRepoCache(cacheDir, { maxBytes: 100 });
+    expect(await cache.trim(now)).toEqual([]);
+    expect(existsSync(join(cacheDir, "busy.git"))).toBe(true);
+  });
+
+  it("drops stale review refs once a day but keeps the one just fetched", async () => {
+    remote = createFixtureRepo(); // its commits are dated 2024, so "old"
+    remote.write("a.ts", "export const a = 1;\n");
+    remote.commit("base");
+    cacheDir = mkdtempSync(join(tmpdir(), "diffmap-cache-"));
+    const gitDir = join(cacheDir, "p.git");
+    mkdirSync(gitDir);
+    const run = (...args: string[]) => remote!.git("--git-dir", gitDir, ...args);
+    run("init", "--bare", "-q");
+    run("fetch", "-q", remote.dir, "+refs/heads/main:refs/heads/main");
+    const head = run("rev-parse", "main");
+    for (const ref of ["refs/merge-requests/1/head", "refs/merge-requests/2/head", "refs/pull/3/head"]) run("update-ref", ref, head);
+
+    const cache = new GitRepoCache(cacheDir, { maxBytes: Infinity });
+    expect(await cache.tidy(gitDir, "refs/merge-requests/2/head")).toBe(2);
+    expect(run("for-each-ref", "--format=%(refname)")).toBe("refs/heads/main\nrefs/merge-requests/2/head");
+    // Already tidied today.
+    run("update-ref", "refs/pull/4/head", head);
+    expect(await cache.tidy(gitDir, "refs/merge-requests/2/head")).toBe(0);
   });
 });
 
