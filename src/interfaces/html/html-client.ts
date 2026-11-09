@@ -140,6 +140,48 @@ export const CLIENT_SCRIPT = `
     tx = e.clientX - drag.x; ty = e.clientY - drag.y; apply();
   });
   window.addEventListener('pointerup', function () { drag = null; vp.classList.remove('drag'); });
+
+  // ── middle-button autoscroll, like a browser page ──
+  // Hold the middle button and move away from where you pressed: the map scrolls
+  // that way, faster the further you go. A middle click without moving keeps it
+  // on until the next click, a scroll, or Escape.
+  var auto = null, DEAD = 10;
+  vp.addEventListener('mousedown', function (e) { if (e.button === 1) e.preventDefault(); }); // no native autoscroll or paste
+  vp.addEventListener('pointerdown', function (e) {
+    if (auto) { stopAuto(); e.preventDefault(); e.stopImmediatePropagation(); return; }
+    if (e.button !== 1 || e.target.closest('textarea')) return;
+    e.preventDefault();
+    var r = vp.getBoundingClientRect();
+    var mark = h('div', 'auto-mark');
+    mark.style.left = (e.clientX - r.left) + 'px'; mark.style.top = (e.clientY - r.top) + 'px';
+    vp.appendChild(mark);
+    vp.classList.add('autoscroll');
+    auto = { ox: e.clientX, oy: e.clientY, cx: e.clientX, cy: e.clientY, moved: false, mark: mark, t: performance.now() };
+    requestAnimationFrame(autoStep);
+  }, true);
+  window.addEventListener('pointermove', function (e) {
+    if (!auto) return;
+    auto.cx = e.clientX; auto.cy = e.clientY;
+    if (Math.abs(auto.cx - auto.ox) + Math.abs(auto.cy - auto.oy) > DEAD) auto.moved = true;
+  });
+  window.addEventListener('pointerup', function (e) { if (auto && e.button === 1 && auto.moved) stopAuto(); });
+  vp.addEventListener('wheel', function () { if (auto) stopAuto(); }, true);
+  window.addEventListener('keydown', function (e) { if (auto && e.key === 'Escape') stopAuto(); });
+  window.addEventListener('blur', function () { if (auto) stopAuto(); });
+  function speed(d) { var a = Math.abs(d) - DEAD; return a <= 0 ? 0 : (d < 0 ? -1 : 1) * a * 8; } // px per second
+  function autoStep(now) {
+    if (!auto) return;
+    var dt = Math.min(0.05, (now - auto.t) / 1000); auto.t = now;
+    var vx = speed(auto.cx - auto.ox), vy = speed(auto.cy - auto.oy);
+    if (vx || vy) { tx -= vx * dt; ty -= vy * dt; apply(); }
+    requestAnimationFrame(autoStep);
+  }
+  function stopAuto() {
+    auto.mark.remove(); auto = null;
+    vp.classList.remove('autoscroll');
+    moved = true; // the click that ends autoscroll is not a selection
+  }
+
   byId('fit').onclick = fit;
   byId('zin').onclick = function () { centre(1.2); };
   byId('zout').onclick = function () { centre(1 / 1.2); };

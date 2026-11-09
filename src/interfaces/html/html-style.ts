@@ -109,6 +109,12 @@ export const STYLE = `
         border:1px solid var(--line); border-radius:12px; background-color:var(--panel);
         background-image:radial-gradient(var(--dots) 1px, transparent 1px); background-size:16px 16px; }
   #vp.drag { cursor:grabbing; }
+  #vp.autoscroll, #vp.autoscroll * { cursor:all-scroll !important; user-select:none; }
+  .auto-mark { position:absolute; z-index:5; width:28px; height:28px; margin:-14px 0 0 -14px; border-radius:50%;
+               border:1px solid var(--line-strong); background:var(--panel); pointer-events:none;
+               box-shadow:0 1px 4px rgba(0,0,0,.25); }
+  .auto-mark::after { content:''; position:absolute; left:50%; top:50%; width:4px; height:4px; margin:-2px 0 0 -2px;
+                      border-radius:50%; background:var(--fg2); }
   #cv { position:absolute; left:0; top:0; transform-origin:0 0; }
   #sv { position:absolute; left:0; top:0; overflow:visible; pointer-events:none; }
   .col-label { position:absolute; top:12px; font-size:13px; font-weight:500; color:var(--fg2); white-space:nowrap; }
