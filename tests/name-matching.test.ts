@@ -356,3 +356,36 @@ describe("return types and chains (roadmap 22.4)", () => {
     expect(assignedExpr("o", "if (o == null) {")).toBeNull();
   });
 });
+
+describe("overloads by argument count (roadmap 22.5)", () => {
+  // Parameters without a written-down type, so only the argument count can tell.
+  it("of several same-named methods, keeps those that accept the arguments", () => {
+    const files = {
+      "app/mail.py": "class Mail:\n    def send(self, to):\n        pass\n",
+      "app/sms.py": "class Sms:\n    def send(self, to, text):\n        pass\n",
+      "app/use.py": "def a(x):\n    x.send('a')\n\ndef b(x):\n    x.send('a', 'b')\n",
+    };
+    expect(callersOf(files, "app/mail.py#Mail.send")).toEqual(["app/use.py#a"]);
+    expect(callersOf(files, "app/sms.py#Sms.send")).toEqual(["app/use.py#b"]);
+  });
+
+  it("default values, varargs and trailing closures", () => {
+    const files = {
+      "app/A.swift": "class A {\n  func load(_ id: Int, cache: Bool = true) {}\n}\n",
+      "app/B.swift": "class B {\n  func load(_ id: Int, cache: Bool, done: () -> Void) {}\n}\n",
+      "app/Use.swift": "class Use {\n  func a() { each { x in x.load(1) } }\n  func b() { each { x in x.load(1, cache: false) { } } }\n}\n",
+    };
+    expect(callersOf(files, "app/A.swift#A.load")).toEqual(["app/Use.swift#Use.a"]);
+    expect(callersOf(files, "app/B.swift#B.load")).toEqual(["app/Use.swift#Use.b"]);
+  });
+
+  it("when none fit, keeps them all (the count may be wrong)", () => {
+    const files = {
+      "app/mail.py": "class Mail:\n    def send(self, to):\n        pass\n",
+      "app/sms.py": "class Sms:\n    def send(self, to):\n        pass\n",
+      "app/use.py": "def a(x):\n    x.send('a', 'b', 'c')\n",
+    };
+    expect(callersOf(files, "app/mail.py#Mail.send")).toEqual(["app/use.py#a"]);
+    expect(callersOf(files, "app/sms.py#Sms.send")).toEqual(["app/use.py#a"]);
+  });
+});

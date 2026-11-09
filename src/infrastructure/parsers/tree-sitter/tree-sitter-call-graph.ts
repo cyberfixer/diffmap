@@ -64,9 +64,11 @@ export class TreeSitterCallGraph implements CallGraphPort {
     const calls: (FoundCall & { file: string })[] = [];
     const typeParents: (TypeParents & { file: string })[] = [];
     const returns = new Map<string, string>(); // symbol id -> declared return type
+    const params = new Map<string, [number, number]>(); // symbol id -> [min, max] arguments
 
     for (const f of files) {
-      const { symbols, calls: found, parents, returns: rets } = this.engine.outline(f.path, f.source);
+      const { symbols, calls: found, parents, returns: rets, params: ps } = this.engine.outline(f.path, f.source);
+      for (const [name, range] of Object.entries(ps)) params.set(`${f.path}#${name}`, range);
       for (const p of parents) typeParents.push({ file: f.path, ...p });
       for (const [name, type] of Object.entries(rets)) returns.set(`${f.path}#${name}`, type);
       linesOf.set(f.path, f.source.split("\n").map((l) => l.replace(/\r$/, "")));
@@ -95,7 +97,15 @@ export class TreeSitterCallGraph implements CallGraphPort {
       const text = linesOf.get(c.file)?.[c.line - 1] ?? "";
       const all = (byName.get(c.name) ?? []).filter((id) => id !== from);
       const narrowed = this.narrow(all, c, from, meta, scope, visibility);
-      const targets = narrowed ?? [];
+      let targets = narrowed ?? [];
+      // Several left: keep those that accept this many arguments (if any do).
+      if (targets.length > 1 && c.args !== undefined) {
+        const fits = targets.filter((id) => {
+          const r = params.get(id);
+          return !r || (r[0] <= c.args! && c.args! <= r[1]);
+        });
+        if (fits.length) targets = fits;
+      }
       const outcome: LinkOutcome =
         all.length === 0 ? "external"
         : narrowed === null ? "libraryType"
