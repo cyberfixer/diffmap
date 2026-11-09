@@ -16,6 +16,18 @@ export interface FoundCall {
   receiver: string;
 }
 
+/** A type and the types it extends or implements: `class Jpa implements Repo` -> { type: "Jpa", parents: ["Repo"] }. */
+export interface TypeParents {
+  type: string; // qualified name, also for containers that are not symbols (Swift extensions, Rust impls)
+  parents: string[];
+}
+
+export interface Outline {
+  symbols: SymbolInfo[];
+  calls: FoundCall[];
+  parents: TypeParents[];
+}
+
 const SELF = /^(this|self|\$this|@|Self|super)$/;
 
 /** The text before the called name: `self.repo.find(x)` -> "self.repo", `new Svc()` -> "". */
@@ -74,13 +86,14 @@ export class TreeSitterEngine {
     return this.with(path, source, (root, spec) => listSymbols(root, spec).map((s) => s.info)) ?? [];
   }
 
-  /** Symbols and the calls made inside them, from one parse. */
-  outline(path: string, source: string): { symbols: SymbolInfo[]; calls: FoundCall[] } {
+  /** Symbols, the calls made inside them, and each type's parent types, from one parse. */
+  outline(path: string, source: string): Outline {
     return (
       this.with(path, source, (root, spec) => {
-        const found = listSymbols(root, spec);
-        return { symbols: found.map((s) => s.info), calls: listCalls(root, spec, found) };
-      }) ?? { symbols: [], calls: [] }
+        const parents: TypeParents[] = [];
+        const found = listSymbols(root, spec, parents);
+        return { symbols: found.map((s) => s.info), calls: listCalls(root, spec, found), parents };
+      }) ?? { symbols: [], calls: [], parents: [] }
     );
   }
 }
@@ -94,7 +107,7 @@ interface Found {
 const endLine = (n: Node): number =>
   n.endPosition.column === 0 && n.endPosition.row > n.startPosition.row ? n.endPosition.row : n.endPosition.row + 1;
 
-function listSymbols(root: Node, spec: LanguageSpec): Found[] {
+function listSymbols(root: Node, spec: LanguageSpec, parents: TypeParents[] = []): Found[] {
   const out: Found[] = [];
   const walk = (node: Node, prefix: string[], inType: boolean): void => {
     let nextPrefix = prefix;
@@ -116,6 +129,8 @@ function listSymbols(root: Node, spec: LanguageSpec): Found[] {
             end: last.endIndex,
           });
         }
+        const supers = rule.supers?.(node) ?? [];
+        if (supers.length) parents.push({ type: qualified, parents: supers });
         nextPrefix = [...prefix, name];
         nextInType = containerOnly || CONTAINERS.has(kind);
       }

@@ -1,7 +1,7 @@
 import type { CallGraphInput, CallGraphPort, CallGraphResult } from "../../../application/ports/call-graph.port.js";
 import { CallCollector, walkNeighbourhood } from "../../../application/call-graph-walk.js";
 import type { GraphNode } from "../../../domain/graph.js";
-import type { FoundCall, TreeSitterEngine } from "./engine.js";
+import type { FoundCall, TreeSitterEngine, TypeParents } from "./engine.js";
 import { Visibility, typeOfVariable } from "./visibility.js";
 
 /** Above this many same-named targets a call is too ambiguous to draw (think `get`, `run`). */
@@ -53,9 +53,11 @@ export class TreeSitterCallGraph implements CallGraphPort {
     const linesOf = new Map<string, string[]>();
     const byName = new Map<string, string[]>();
     const calls: (FoundCall & { file: string })[] = [];
+    const typeParents: (TypeParents & { file: string })[] = [];
 
     for (const f of files) {
-      const { symbols, calls: found } = this.engine.outline(f.path, f.source);
+      const { symbols, calls: found, parents } = this.engine.outline(f.path, f.source);
+      for (const p of parents) typeParents.push({ file: f.path, ...p });
       linesOf.set(f.path, f.source.split("\n").map((l) => l.replace(/\r$/, "")));
       for (const s of symbols) {
         const id = `${f.path}#${s.name}`;
@@ -67,7 +69,7 @@ export class TreeSitterCallGraph implements CallGraphPort {
       for (const c of found) calls.push({ file: f.path, ...c });
     }
     const visibility = new Visibility(files);
-    const scope = new TypeScope(meta, linesOf, visibility);
+    const scope = new TypeScope(meta, linesOf, visibility, typeParents);
 
     const removedByName = new Map<string, string[]>();
     for (const r of removed) {
@@ -97,7 +99,53 @@ export class TreeSitterCallGraph implements CallGraphPort {
         for (const to of removedByName.get(c.name) ?? []) collector.add(from, to, "calls-removed", c.line, text);
       }
     }
+    stats.implementsLinks = this.linkImplementations(typeParents, meta, linesOf, scope, visibility, collector);
     return { meta, linesOf, collector, stats };
+  }
+
+  /**
+   * `class Jpa implements Repo` (or `: Repo`, `extends`, `impl Repo for`): each
+   * method of Jpa implements the same-named method of Repo and of Repo's own
+   * parents, when the file can see them. Returns how many links were added.
+   */
+  private linkImplementations(
+    typeParents: (TypeParents & { file: string })[],
+    meta: Map<string, GraphNode>,
+    linesOf: Map<string, string[]>,
+    scope: TypeScope,
+    visibility: Visibility,
+    collector: CallCollector,
+  ): number {
+    const methodsOf = new Map<string, GraphNode[]>(); // owner's simple name -> its methods
+    for (const n of meta.values()) {
+      const o = owner(n.name);
+      if (o && !TYPE_KINDS.has(n.kind)) methodsOf.set(simple(o), [...(methodsOf.get(simple(o)) ?? []), n]);
+    }
+    let added = 0;
+    const seen = new Set<string>();
+    for (const t of typeParents) {
+      const ancestors = scope.ancestorsOf(simple(t.type));
+      // Methods of this type: in the declaring file, or (Swift extensions) files that see each other.
+      const own = (methodsOf.get(simple(t.type)) ?? []).filter(
+        (m) => owner(m.name) === t.type && (m.file === t.file || visibility.canSee(m.file, t.file) || visibility.canSee(t.file, m.file)),
+      );
+      for (const m of own) {
+        const name = simple(m.name);
+        if (CONSTRUCTORS.has(name) || name === simple(t.type)) continue;
+        for (const a of ancestors) {
+          const candidates = (methodsOf.get(a) ?? []).filter((p) => simple(p.name) === name && p.id !== m.id);
+          const visible = candidates.filter((p) => visibility.canSee(m.file, p.file));
+          for (const p of visible.length ? visible : candidates.length === 1 ? candidates : []) {
+            const key = `${m.id}>${p.id}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            collector.add(m.id, p.id, "implements", m.line, linesOf.get(m.file)?.[m.line - 1] ?? "");
+            added++;
+          }
+        }
+      }
+    }
+    return added;
   }
 
   /** Keep only the targets the call can reach (see the class comment); null for a call on a library type. */
@@ -119,6 +167,8 @@ export class TreeSitterCallGraph implements CallGraphPort {
       const cls = owner(caller.name);
       const own = all.filter((id) => node(id).file === c.file && owner(node(id).name) === cls);
       if (own.length) return own;
+      const inherited = scope.inAncestors(all, simple(cls), c.file);
+      if (inherited.length) return inherited;
       return all.filter((id) => owner(node(id).name) !== "" && visibility.canSee(c.file, node(id).file));
     }
 
@@ -131,6 +181,11 @@ export class TreeSitterCallGraph implements CallGraphPort {
       if (!scope.isRepoType(typeName)) return null;
       const typed = all.filter((id) => ownerSimple(node(id).name) === typeName || simple(node(id).name) === typeName);
       if (typed.length) return typed;
+      // Not declared on that type: a method it inherits.
+      const inherited = scope.inAncestors(all, typeName, c.file);
+      if (inherited.length) return inherited;
+      // ...or one it inherits from a library type (`interface OrderRepo extends JpaRepository`).
+      if (scope.ancestorsOf(typeName).some((a) => !scope.isRepoType(a))) return null;
     }
 
     // Same file first, then files the caller imports or shares a folder with.
@@ -159,12 +214,20 @@ class TypeScope {
   /** Lines of each type's members, so their local variables don't count as fields. */
   private readonly memberLines = new Map<string, [number, number][]>();
   private readonly cache = new Map<string, string | null>();
+  /** Parent type names by type name (simple names; several declarations merge). */
+  private readonly parents = new Map<string, string[]>();
+  private readonly ancestorCache = new Map<string, string[]>();
 
   constructor(
     private readonly meta: Map<string, GraphNode>,
     private readonly linesOf: Map<string, string[]>,
     private readonly visibility: Visibility,
+    typeParents: { type: string; parents: string[] }[] = [],
   ) {
+    for (const t of typeParents) {
+      const key = simple(t.type);
+      this.parents.set(key, [...new Set([...(this.parents.get(key) ?? []), ...t.parents])]);
+    }
     for (const n of meta.values()) {
       if (TYPE_KINDS.has(n.kind)) {
         const key = simple(n.name);
@@ -179,6 +242,36 @@ class TypeScope {
         this.memberLines.set(key, [...(this.memberLines.get(key) ?? []), [n.line, n.endLine ?? n.line]]);
       }
     }
+  }
+
+  /** Parents, grandparents… of a type, nearest first (simple names, at most 8 levels). */
+  ancestorsOf(type: string): string[] {
+    const cached = this.ancestorCache.get(type);
+    if (cached) return cached;
+    const out: string[] = [];
+    let level = this.parents.get(type) ?? [];
+    for (let depth = 0; depth < 8 && level.length; depth++) {
+      const next: string[] = [];
+      for (const p of level) {
+        if (p === type || out.includes(p)) continue;
+        out.push(p);
+        next.push(...(this.parents.get(p) ?? []));
+      }
+      level = next;
+    }
+    this.ancestorCache.set(type, out);
+    return out;
+  }
+
+  /** The candidates declared on the nearest ancestor of `type` that has one (visible from `file` when possible). */
+  inAncestors(all: string[], type: string, file: string): string[] {
+    for (const a of this.ancestorsOf(type)) {
+      const found = all.filter((id) => ownerSimple(this.meta.get(id)!.name) === a);
+      if (!found.length) continue;
+      const visible = found.filter((id) => this.visibility.canSee(file, this.meta.get(id)!.file));
+      return visible.length ? visible : found;
+    }
+    return [];
   }
 
   isRepoType(name: string): boolean {

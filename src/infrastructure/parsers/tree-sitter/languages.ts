@@ -16,6 +16,8 @@ export interface DefRule {
   containerOnly?: boolean | ((n: Node) => boolean);
   /** The symbol also covers this later node (Kotlin puts a property's `get()` next to it, not inside). */
   extendTo?: (n: Node) => Node | null;
+  /** Names of the types this one extends or implements (`class A extends B implements C` -> B, C). */
+  supers?: (n: Node) => string[];
 }
 
 /** How to find the called name in one kind of call node. */
@@ -60,6 +62,30 @@ function declaratorName(n: Node): string | null {
 
 const hasBody = (n: Node) => n.childForFieldName("body") !== null;
 
+/** Generic arguments and constructor arguments are not parent types: `Base<T>(x)` -> Base. */
+const NOT_A_PARENT = /type_arguments|type_parameters|type_argument_list|template_argument_list|value_arguments|^arguments$/;
+
+/**
+ * Parent types written in the given child nodes (`extends`, `implements`, `: Base`):
+ * every capitalised name in them, skipping generic arguments. Package parts
+ * (`com.x.Base`) are lowercase, so only `Base` is kept.
+ */
+const parentsIn =
+  (...childTypes: string[]) =>
+  (n: Node): string[] => {
+    const out: string[] = [];
+    const walk = (c: Node): void => {
+      if (NOT_A_PARENT.test(c.type)) return;
+      if (c.namedChildCount === 0) {
+        if (/^[A-Z]\w*$/.test(c.text) && !out.includes(c.text)) out.push(c.text);
+        return;
+      }
+      for (const k of c.namedChildren) walk(k);
+    };
+    for (const c of n.namedChildren) if (childTypes.includes(c.type)) walk(c);
+    return out;
+  };
+
 /** True when the node has this keyword as a direct child (Kotlin `interface X`, `enum class X`). */
 const keyword = (n: Node, word: string) => n.children.some((c) => c.type === word);
 
@@ -92,17 +118,20 @@ export const LANGUAGES: LanguageSpec[] = [
   {
     id: "python",
     extensions: [".py"],
-    defs: { function_definition: { kind: "function" }, class_definition: { kind: "class" } },
+    defs: {
+      function_definition: { kind: "function" },
+      class_definition: { kind: "class", supers: parentsIn("argument_list") }, // class A(Base, Mixin)
+    },
     calls: { call: field("function") },
   },
   {
     id: "java",
     extensions: [".java"],
     defs: {
-      class_declaration: { kind: "class" },
-      record_declaration: { kind: "class" },
-      interface_declaration: { kind: "interface" },
-      enum_declaration: { kind: "enum" },
+      class_declaration: { kind: "class", supers: parentsIn("superclass", "super_interfaces") },
+      record_declaration: { kind: "class", supers: parentsIn("super_interfaces") },
+      interface_declaration: { kind: "interface", supers: parentsIn("extends_interfaces") },
+      enum_declaration: { kind: "enum", supers: parentsIn("super_interfaces") },
       method_declaration: { kind: "method" },
       constructor_declaration: { kind: "method" },
     },
@@ -140,10 +169,10 @@ export const LANGUAGES: LanguageSpec[] = [
     id: "c_sharp",
     extensions: [".cs"],
     defs: {
-      class_declaration: { kind: "class" },
-      record_declaration: { kind: "class" },
-      struct_declaration: { kind: "struct" },
-      interface_declaration: { kind: "interface" },
+      class_declaration: { kind: "class", supers: parentsIn("base_list") },
+      record_declaration: { kind: "class", supers: parentsIn("base_list") },
+      struct_declaration: { kind: "struct", supers: parentsIn("base_list") },
+      interface_declaration: { kind: "interface", supers: parentsIn("base_list") },
       enum_declaration: { kind: "enum" },
       namespace_declaration: { kind: "module", containerOnly: true },
       method_declaration: { kind: "method" },
@@ -163,8 +192,8 @@ export const LANGUAGES: LanguageSpec[] = [
     id: "php",
     extensions: [".php"],
     defs: {
-      class_declaration: { kind: "class" },
-      interface_declaration: { kind: "interface" },
+      class_declaration: { kind: "class", supers: parentsIn("base_clause", "class_interface_clause") },
+      interface_declaration: { kind: "interface", supers: parentsIn("base_clause") },
       trait_declaration: { kind: "trait" },
       enum_declaration: { kind: "enum" },
       method_declaration: { kind: "method" },
@@ -182,7 +211,7 @@ export const LANGUAGES: LanguageSpec[] = [
     id: "ruby",
     extensions: [".rb"],
     defs: {
-      class: { kind: "class" },
+      class: { kind: "class", supers: parentsIn("superclass") },
       module: { kind: "module" },
       method: { kind: "method" },
       singleton_method: { kind: "method" },
@@ -205,7 +234,16 @@ export const LANGUAGES: LanguageSpec[] = [
       enum_item: { kind: "enum" },
       trait_item: { kind: "trait" },
       mod_item: { kind: "module", containerOnly: true },
-      impl_item: { kind: "class", containerOnly: true, name: fieldName("type") },
+      // impl Trait for Svc { ... }: names Svc's methods, and Svc implements Trait
+      impl_item: {
+        kind: "class",
+        containerOnly: true,
+        name: fieldName("type"),
+        supers: (n) => {
+          const t = fieldName("trait")(n);
+          return t ? [t] : [];
+        },
+      },
     },
     calls: { call_expression: field("function") },
   },
@@ -217,8 +255,9 @@ export const LANGUAGES: LanguageSpec[] = [
         kind: "class",
         name: firstIdent,
         kindOf: (n) => (keyword(n, "interface") ? "interface" : keyword(n, "enum") ? "enum" : "class"),
+        supers: parentsIn("delegation_specifier", "delegation_specifiers"),
       },
-      object_declaration: { kind: "module", name: firstIdent },
+      object_declaration: { kind: "module", name: firstIdent, supers: parentsIn("delegation_specifier", "delegation_specifiers") },
       function_declaration: { kind: "function", name: firstIdent },
       secondary_constructor: { kind: "method", name: () => "constructor" },
       // val total: Int get() = ... (a property with code)
@@ -247,8 +286,9 @@ export const LANGUAGES: LanguageSpec[] = [
           return k === "struct" ? "struct" : k === "enum" ? "enum" : "class";
         },
         containerOnly: (n) => n.childForFieldName("declaration_kind")?.text === "extension",
+        supers: parentsIn("inheritance_specifier"),
       },
-      protocol_declaration: { kind: "interface" },
+      protocol_declaration: { kind: "interface", supers: parentsIn("inheritance_specifier") },
       function_declaration: { kind: "function" },
       protocol_function_declaration: { kind: "method" },
       init_declaration: { kind: "method", name: () => "init" },
@@ -267,9 +307,9 @@ export const LANGUAGES: LanguageSpec[] = [
     id: "scala",
     extensions: [".scala"],
     defs: {
-      class_definition: { kind: "class" },
-      object_definition: { kind: "module" },
-      trait_definition: { kind: "trait" },
+      class_definition: { kind: "class", supers: parentsIn("extends_clause") },
+      object_definition: { kind: "module", supers: parentsIn("extends_clause") },
+      trait_definition: { kind: "trait", supers: parentsIn("extends_clause") },
       function_definition: { kind: "function" },
     },
     calls: { call_expression: field("function"), instance_expression: firstChild },
@@ -288,8 +328,8 @@ export const LANGUAGES: LanguageSpec[] = [
     extensions: [".cpp", ".cc", ".cxx", ".hpp", ".hh", ".hxx"],
     defs: {
       function_definition: { kind: "function", name: declaratorName },
-      class_specifier: { kind: "class", when: hasBody },
-      struct_specifier: { kind: "struct", when: hasBody },
+      class_specifier: { kind: "class", when: hasBody, supers: parentsIn("base_class_clause") },
+      struct_specifier: { kind: "struct", when: hasBody, supers: parentsIn("base_class_clause") },
       namespace_definition: { kind: "module", containerOnly: true },
     },
     calls: { call_expression: field("function"), new_expression: field("type") },

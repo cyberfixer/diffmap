@@ -43,6 +43,14 @@ export function walkNeighbourhood(input: {
     between.set(pair, [...(between.get(pair) ?? []), e]);
   }
 
+  // Callers of an interface method also run its implementations: `implements` links, and calls only.
+  const implemented = new Map<string, Set<string>>();
+  const callersOnly = new Map<string, Set<string>>();
+  for (const e of calls.values()) {
+    if (e.kind === "implements") (implemented.get(e.from) ?? implemented.set(e.from, new Set()).get(e.from)!).add(e.to);
+    if (e.kind === "calls") (callersOnly.get(e.to) ?? callersOnly.set(e.to, new Set()).get(e.to)!).add(e.from);
+  }
+
   const changed = new Set(input.changedIds.filter((id) => meta.has(id)));
   const included = new Set(changed);
   const edges = new Map<string, GraphEdge>();
@@ -60,6 +68,19 @@ export function walkNeighbourhood(input: {
           else keep(n, id);
           if (!included.has(n)) next.add(n);
           included.add(n);
+        }
+        // A changed implementation: whoever calls the interface method it implements
+        // reaches it too, in the same hop.
+        if (direction === "callers") {
+          for (const parent of implemented.get(id) ?? []) {
+            keep(id, parent);
+            included.add(parent);
+            for (const n of callersOnly.get(parent) ?? []) {
+              keep(n, parent);
+              if (!included.has(n)) next.add(n);
+              included.add(n);
+            }
+          }
         }
       }
       frontier = next;

@@ -203,3 +203,81 @@ describe("missing definitions and calls (roadmap 22.2)", () => {
     expect(callersOf(files, "app/String+Slug.swift#String.slug")).toEqual(["app/Use.swift#Use.run"]);
   });
 });
+
+describe("interfaces and implementations (roadmap 22.3)", () => {
+  const build = (files: Record<string, string>, changed: string[], depth = 1) =>
+    graph.build({ files: Object.entries(files).map(([path, source]) => ({ path, source })), changedIds: changed, removed: [], depth });
+  const implementsOf = (files: Record<string, string>) =>
+    [...graph.link(Object.entries(files).map(([path, source]) => ({ path, source }))).collector.calls.values()]
+      .filter((e) => e.kind === "implements")
+      .map((e) => `${e.from} -> ${e.to}`)
+      .sort();
+
+  it("Java: implements and extends, through a chain of parents", () => {
+    const files = {
+      "app/Crud.java": "interface Crud {\n  void save(Order o);\n}\n",
+      "app/OrderRepo.java": "interface OrderRepo extends Crud {\n  void find(int id);\n}\n",
+      "app/JpaOrderRepo.java": "class JpaOrderRepo implements OrderRepo {\n  public void save(Order o) {}\n  public void find(int id) {}\n}\n",
+    };
+    expect(implementsOf(files)).toEqual([
+      "app/JpaOrderRepo.java#JpaOrderRepo.find -> app/OrderRepo.java#OrderRepo.find",
+      "app/JpaOrderRepo.java#JpaOrderRepo.save -> app/Crud.java#Crud.save",
+    ]);
+  });
+
+  it("Swift (protocol through an extension), Kotlin, C#, Rust", () => {
+    expect(
+      implementsOf({
+        "app/Repo.swift": "protocol Repo {\n  func save()\n}\n",
+        "app/Disk.swift": "final class Disk {\n}\nextension Disk: Repo {\n  func save() {}\n}\n",
+      }),
+    ).toEqual(["app/Disk.swift#Disk.save -> app/Repo.swift#Repo.save"]);
+    expect(
+      implementsOf({ "app/a.kt": "interface Repo {\n  fun save()\n}\nclass Disk : Repo {\n  override fun save() {}\n}\n" }),
+    ).toEqual(["app/a.kt#Disk.save -> app/a.kt#Repo.save"]);
+    expect(
+      implementsOf({ "app/a.cs": "interface IRepo {\n  void Save();\n}\nclass Disk : IRepo {\n  public void Save() {}\n}\n" }),
+    ).toEqual(["app/a.cs#Disk.Save -> app/a.cs#IRepo.Save"]);
+    expect(
+      implementsOf({ "src/a.rs": "trait Repo {\n    fn save(&self);\n}\nstruct Disk;\nimpl Repo for Disk {\n    fn save(&self) {}\n}\n" }),
+    ).toEqual(["src/a.rs#Disk.save -> src/a.rs#Repo.save"]);
+  });
+
+  it("a changed implementation shows who calls the interface, at depth 1", () => {
+    const files = {
+      "app/OrderRepo.java": "interface OrderRepo {\n  void save(Order o);\n}\n",
+      "app/JpaOrderRepo.java": "class JpaOrderRepo implements OrderRepo {\n  public void save(Order o) {}\n}\n",
+      "app/OrderService.java": "class OrderService {\n  private OrderRepo repo;\n  void place(Order o) { repo.save(o); }\n}\n",
+    };
+    const r = build(files, ["app/JpaOrderRepo.java#JpaOrderRepo.save"]);
+    expect(r.nodes.map((n) => n.id).sort()).toEqual([
+      "app/JpaOrderRepo.java#JpaOrderRepo.save",
+      "app/OrderRepo.java#OrderRepo.save",
+      "app/OrderService.java#OrderService.place",
+    ]);
+    expect(r.edges.map((e) => `${e.from} ${e.kind} ${e.to}`).sort()).toEqual([
+      "app/JpaOrderRepo.java#JpaOrderRepo.save implements app/OrderRepo.java#OrderRepo.save",
+      "app/OrderService.java#OrderService.place calls app/OrderRepo.java#OrderRepo.save",
+    ]);
+  });
+
+  it("inherited methods: this.x() and child.x() find the parent's method", () => {
+    const files = {
+      "app/Base.java": "class Base {\n  void audit() {}\n}\n",
+      "app/Other.java": "class Other {\n  void audit() {}\n}\n",
+      "app/Child.java": "class Child extends Base {\n  void run() { this.audit(); }\n}\n",
+      "app/Use.java": "class Use {\n  void go(Child c) { c.audit(); }\n}\n",
+    };
+    expect(callersOf(files, "app/Base.java#Base.audit")).toEqual(["app/Child.java#Child.run", "app/Use.java#Use.go"]);
+    expect(callersOf(files, "app/Other.java#Other.audit")).toEqual([]);
+  });
+
+  it("a method inherited from a library type is not linked to repo code", () => {
+    const files = {
+      "app/OrderRepo.java": "interface OrderRepo extends JpaRepository<Order, Long> {\n  void custom();\n}\n",
+      "app/Cache.java": "class Cache {\n  void findById(long id) {}\n}\n",
+      "app/Use.java": "class Use {\n  private OrderRepo repo;\n  void go() { repo.findById(1); }\n}\n",
+    };
+    expect(callersOf(files, "app/Cache.java#Cache.findById")).toEqual([]);
+  });
+});
