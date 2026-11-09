@@ -50,4 +50,5 @@ console.log(`  one target    ${String(s.one).padStart(7)}  ${pct(s.one)}`);
 console.log(`  2-5 targets   ${String(s.several).padStart(7)}  ${pct(s.several)}`);
 console.log(`  too many      ${String(s.tooMany).padStart(7)}  ${pct(s.tooMany)}`);
 console.log(`  unreachable   ${String(s.unreachable).padStart(7)}  ${pct(s.unreachable)}`);
+console.log(`  library type  ${String(s.libraryType).padStart(7)}  ${pct(s.libraryType)}  (left out on purpose)`);
 console.log(`implements links: ${s.implementsLinks}`);

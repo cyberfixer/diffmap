@@ -105,3 +105,71 @@ describe("arrow functions as class properties (roadmap 3)", () => {
     expect(callersOf({ "form.js": src }, "form.js#Form.validate")).toEqual(["form.js#Form.handler"]);
   });
 });
+
+describe("field and property types (roadmap 22.1)", () => {
+  const two = (ext: string, repo: string, cache: string) => ({ [`app/Repo${ext}`]: repo, [`app/Cache${ext}`]: cache });
+
+  it("Java: a field's type picks the method, with or without this.", () => {
+    const files = {
+      ...two(".java", "class Repo {\n  void save() {}\n}\n", "class Cache {\n  void save() {}\n}\n"),
+      "app/Svc.java":
+        "class Svc {\n  private final Repo repo;\n  Svc(Repo repo) { this.repo = repo; }\n  void a() { repo.save(); }\n  void b() { this.repo.save(); }\n}\n",
+    };
+    expect(callersOf(files, "app/Repo.java#Repo.save")).toEqual(["app/Svc.java#Svc.a", "app/Svc.java#Svc.b"]);
+    expect(callersOf(files, "app/Cache.java#Cache.save")).toEqual([]);
+  });
+
+  it("another method's local variable is not a field", () => {
+    const files = {
+      ...two(".java", "class Repo {\n  void save() {}\n}\n", "class Cache {\n  void save() {}\n}\n"),
+      "app/Svc.java": "class Svc {\n  private Repo store;\n  void a() { Cache store = null; }\n  void b() { store.save(); }\n}\n",
+    };
+    expect(callersOf(files, "app/Repo.java#Repo.save")).toEqual(["app/Svc.java#Svc.b"]);
+    expect(callersOf(files, "app/Cache.java#Cache.save")).toEqual([]);
+  });
+
+  it("Swift: a stored property, also used from an extension in another file", () => {
+    const files = {
+      ...two(".swift", "class Repo {\n  func save() {}\n}\n", "class Cache {\n  func save() {}\n}\n"),
+      "app/Svc.swift": "final class Svc {\n  private let repo: Repo\n  func a() { repo.save() }\n}\n",
+      "app/Svc+More.swift": "extension Svc {\n  func b() { self.repo.save() }\n}\n",
+    };
+    expect(callersOf(files, "app/Repo.swift#Repo.save")).toEqual(["app/Svc+More.swift#Svc.b", "app/Svc.swift#Svc.a"]);
+    expect(callersOf(files, "app/Cache.swift#Cache.save")).toEqual([]);
+  });
+
+  it("Kotlin: a constructor property", () => {
+    const files = {
+      ...two(".kt", "class Repo {\n  fun save() {}\n}\n", "class Cache {\n  fun save() {}\n}\n"),
+      "app/Svc.kt": "class Svc(private val repo: Repo) {\n  fun a() { repo.save() }\n}\n",
+    };
+    expect(callersOf(files, "app/Repo.kt#Repo.save")).toEqual(["app/Svc.kt#Svc.a"]);
+    expect(callersOf(files, "app/Cache.kt#Cache.save")).toEqual([]);
+  });
+
+  it("Python: a field set in __init__", () => {
+    const files = {
+      "app/repo.py": "class Repo:\n    def save(self):\n        pass\n\nclass Cache:\n    def save(self):\n        pass\n",
+      "app/svc.py": "from app.repo import Repo\n\nclass Svc:\n    def __init__(self):\n        self.repo = Repo()\n    def a(self):\n        self.repo.save()\n",
+    };
+    expect(callersOf(files, "app/repo.py#Repo.save")).toEqual(["app/svc.py#Svc.a"]);
+    expect(callersOf(files, "app/repo.py#Cache.save")).toEqual([]);
+  });
+
+  it("Go: a struct field through the method's receiver", () => {
+    const files = {
+      "app/repo.go": "package app\n\ntype Repo struct{}\n\nfunc (r *Repo) Save() {}\n\ntype Cache struct{}\n\nfunc (c *Cache) Save() {}\n",
+      "app/svc.go": "package app\n\ntype Svc struct {\n\trepo *Repo\n}\n\nfunc (s *Svc) A() { s.repo.Save() }\n",
+    };
+    expect(callersOf(files, "app/repo.go#Repo.Save")).toEqual(["app/svc.go#Svc.A"]);
+    expect(callersOf(files, "app/repo.go#Cache.Save")).toEqual([]);
+  });
+
+  it("a variable of a library type is not linked to repo code", () => {
+    const files = {
+      "app/Box.java": "class Box {\n  void add(int x) {}\n}\n",
+      "app/Use.java": "class Use {\n  void a(List<String> items) { items.add(\"x\"); }\n}\n",
+    };
+    expect(callersOf(files, "app/Box.java#Box.add")).toEqual([]);
+  });
+});

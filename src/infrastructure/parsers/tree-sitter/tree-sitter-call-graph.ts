@@ -22,6 +22,8 @@ export interface LinkStats {
   tooMany: number;
   /** Symbols of that name exist, but none the caller can reach. */
   unreachable: number;
+  /** Made on a variable whose type the repo doesn't define (String, List…): left out. */
+  libraryType: number;
   implementsLinks: number;
 }
 
@@ -65,6 +67,7 @@ export class TreeSitterCallGraph implements CallGraphPort {
       for (const c of found) calls.push({ file: f.path, ...c });
     }
     const visibility = new Visibility(files);
+    const scope = new TypeScope(meta, linesOf, visibility);
 
     const removedByName = new Map<string, string[]>();
     for (const r of removed) {
@@ -72,15 +75,17 @@ export class TreeSitterCallGraph implements CallGraphPort {
       removedByName.set(key, [...(removedByName.get(key) ?? []), r.id]);
     }
 
-    const stats: LinkStats = { calls: 0, external: 0, one: 0, several: 0, tooMany: 0, unreachable: 0, implementsLinks: 0 };
+    const stats: LinkStats = { calls: 0, external: 0, one: 0, several: 0, tooMany: 0, unreachable: 0, libraryType: 0, implementsLinks: 0 };
     const collector = new CallCollector();
     for (const c of calls) {
       const from = `${c.file}#${c.from}`;
       const text = linesOf.get(c.file)?.[c.line - 1] ?? "";
       const all = (byName.get(c.name) ?? []).filter((id) => id !== from);
-      const targets = this.narrow(all, c, from, meta, linesOf, visibility);
+      const narrowed = this.narrow(all, c, from, meta, scope, visibility);
+      const targets = narrowed ?? [];
       stats.calls++;
       if (all.length === 0) stats.external++;
+      else if (narrowed === null) stats.libraryType++;
       else if (targets.length === 0) stats.unreachable++;
       else if (targets.length === 1) stats.one++;
       else if (targets.length <= MAX_TARGETS) stats.several++;
@@ -95,21 +100,22 @@ export class TreeSitterCallGraph implements CallGraphPort {
     return { meta, linesOf, collector, stats };
   }
 
-  /** Keep only the targets the call can reach (see the class comment). */
+  /** Keep only the targets the call can reach (see the class comment); null for a call on a library type. */
   private narrow(
     all: string[],
     c: FoundCall & { file: string },
     from: string,
     meta: Map<string, GraphNode>,
-    linesOf: Map<string, string[]>,
+    scope: TypeScope,
     visibility: Visibility,
-  ): string[] {
+  ): string[] | null {
     if (all.length === 0) return [];
     const node = (id: string) => meta.get(id)!;
     const caller = meta.get(from);
+    const receiver = caller ? scope.plainReceiver(c.receiver, caller) : c.receiver;
 
     // self.x() / this.x(): the caller's own class (or, if it isn't there, an inherited one it can see)
-    if (c.receiver === "self" && caller) {
+    if (receiver === "self" && caller) {
       const cls = owner(caller.name);
       const own = all.filter((id) => node(id).file === c.file && owner(node(id).name) === cls);
       if (own.length) return own;
@@ -117,13 +123,12 @@ export class TreeSitterCallGraph implements CallGraphPort {
     }
 
     // Svc.x() or v.x() where v's type is written down: that class's x
-    const lastPart = c.receiver.split(/\.|->|::/).pop() ?? "";
+    const lastPart = receiver.split(/\.|->|::/).pop() ?? "";
     let typeName: string | null = /^[A-Z]/.test(lastPart) ? lastPart : null;
-    if (!typeName && /^\$?[A-Za-z_]\w*$/.test(c.receiver) && caller) {
-      const code = (linesOf.get(c.file) ?? []).slice(caller.line - 1, caller.endLine ?? caller.line).join("\n");
-      typeName = typeOfVariable(c.receiver, code);
-    }
+    if (!typeName && /^[$@]?[A-Za-z_]\w*$/.test(receiver) && caller) typeName = scope.typeOf(receiver, caller);
     if (typeName) {
+      // A type the repo doesn't define (String, List, a library class): not a call into repo code.
+      if (!scope.isRepoType(typeName)) return null;
       const typed = all.filter((id) => ownerSimple(node(id).name) === typeName || simple(node(id).name) === typeName);
       if (typed.length) return typed;
     }
@@ -136,5 +141,90 @@ export class TreeSitterCallGraph implements CallGraphPort {
 
     // Nothing reachable: only a name that exists once in the whole repo is trusted.
     return all.length === 1 ? all : [];
+  }
+}
+
+const TYPE_KINDS = new Set(["class", "struct", "interface", "enum", "trait", "module"]);
+const CONSTRUCTORS = new Set(["__init__", "initialize", "constructor", "__construct", "init"]);
+
+/**
+ * Where variable types are written down: the calling method, then its class
+ * (fields, properties, constructor parameters), then classes of the same name
+ * the caller can see (Swift extensions, Go structs declared in another file).
+ */
+class TypeScope {
+  private readonly typesByName = new Map<string, GraphNode[]>();
+  /** Lines of each type's members, so their local variables don't count as fields. */
+  private readonly memberLines = new Map<string, [number, number][]>();
+  private readonly cache = new Map<string, string | null>();
+
+  constructor(
+    private readonly meta: Map<string, GraphNode>,
+    private readonly linesOf: Map<string, string[]>,
+    private readonly visibility: Visibility,
+  ) {
+    for (const n of meta.values()) {
+      if (TYPE_KINDS.has(n.kind)) {
+        const key = simple(n.name);
+        this.typesByName.set(key, [...(this.typesByName.get(key) ?? []), n]);
+      }
+      const cls = owner(n.name);
+      // Constructors stay: Python, Ruby, JS and PHP set their fields there (`self.repo = Repo()`).
+      if (cls && !CONSTRUCTORS.has(simple(n.name)) && simple(n.name) !== simple(cls)) {
+        const key = `${n.file}#${cls}`;
+        this.memberLines.set(key, [...(this.memberLines.get(key) ?? []), [n.line, n.endLine ?? n.line]]);
+      }
+    }
+  }
+
+  isRepoType(name: string): boolean {
+    return this.typesByName.has(name);
+  }
+
+  /** `this.repo` / `self.repo` / `$this->repo` / `@repo` -> "repo"; Go's `s` in `func (s *Svc)` -> "self". */
+  plainReceiver(receiver: string, caller: GraphNode): string {
+    let r = receiver.replace(/^(?:this|self|\$this)\s*(?:\.|->)\s*/, "").replace(/^@(?=\w)/, "");
+    const head = /^(\w+)(?:\.|$)/.exec(r)?.[1];
+    if (head && caller.kind === "method") {
+      const first = this.linesOf.get(caller.file)?.[caller.line - 1] ?? "";
+      if (new RegExp(`^\\s*func\\s*\\(\\s*${head}\\s+\\*?[A-Z]`).test(first)) r = r === head ? "self" : r.slice(head.length + 1);
+    }
+    return r;
+  }
+
+  typeOf(variable: string, caller: GraphNode): string | null {
+    const key = `${caller.id}>${variable}`;
+    if (this.cache.has(key)) return this.cache.get(key)!;
+    let found = typeOfVariable(variable, this.code(caller));
+    const cls = owner(caller.name);
+    if (!found && cls) {
+      const own = this.meta.get(`${caller.file}#${cls}`);
+      const others = (this.typesByName.get(simple(cls)) ?? []).filter(
+        (t) => t !== own && t.name === cls && this.visibility.canSee(caller.file, t.file),
+      );
+      for (const t of own ? [own, ...others] : others) {
+        found = this.fieldType(variable, t);
+        if (found) break;
+      }
+    }
+    this.cache.set(key, found);
+    return found;
+  }
+
+  private fieldType(variable: string, type: GraphNode): string | null {
+    const key = `${type.id}>>${variable}`;
+    if (this.cache.has(key)) return this.cache.get(key)!;
+    const lines = [...(this.linesOf.get(type.file) ?? []).slice(type.line - 1, type.endLine ?? type.line)];
+    for (const [a, b] of this.memberLines.get(`${type.file}#${type.name}`) ?? []) {
+      if (a === type.line) continue; // a member on the type's own first line (Kotlin `class A(val x: X)`)
+      for (let i = a; i <= b; i++) if (i - type.line >= 0 && i - type.line < lines.length) lines[i - type.line] = "";
+    }
+    const found = typeOfVariable(variable, lines.join("\n"));
+    this.cache.set(key, found);
+    return found;
+  }
+
+  private code(n: GraphNode): string {
+    return (this.linesOf.get(n.file) ?? []).slice(n.line - 1, n.endLine ?? n.line).join("\n");
   }
 }

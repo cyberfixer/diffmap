@@ -46,14 +46,17 @@ const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 /**
  * The declared type of a variable inside a piece of code, from the usual forms:
  * `Svc svc` (Java, C#, C++), `svc: Svc` (TS, Kotlin, Swift, Python, Rust, Scala),
- * `svc = Svc(...)` / `svc = new Svc(...)` / `svc := Svc{` / `$svc = new Svc(`.
+ * `svc = Svc(...)` / `svc = new Svc(...)` / `svc := Svc{` / `$svc = new Svc(`,
+ * `svc Svc` / `svc *pkg.Svc` (Go fields and parameters), `@svc = Svc.new` (Ruby).
  */
 export function typeOfVariable(variable: string, code: string): string | null {
-  const v = escape(variable.replace(/^\$/, ""));
+  const v = escape(variable.replace(/^[$@]/, ""));
   const patterns = [
     new RegExp(`\\b([A-Z][\\w]*)(?:<[^>]*>)?[*&\\s]+\\$?${v}\\b\\s*[=;,)]`), // Svc svc = / (Svc svc)
     new RegExp(`\\$?\\b${v}\\s*:\\s*(?:&\\s*(?:mut\\s+)?)?\\*?([A-Z][\\w]*)`), // svc: Svc
     new RegExp(`\\$?\\b${v}\\s*:?=\\s*(?:new\\s+|&)?([A-Z][\\w]*)\\s*[({]`), // svc = Svc( / new Svc( / := Svc{
+    new RegExp(`(?:^|[(,])[ \\t]*${v}[ \\t]+\\*?(?:[a-z]\\w*\\.)?([A-Z][\\w]*)`, "m"), // Go: svc *Svc / (svc pkg.Svc)
+    new RegExp(`@?\\b${v}\\s*=\\s*([A-Z][\\w]*)\\.new\\b`), // Ruby: @svc = Svc.new
   ];
   for (const p of patterns) {
     const m = code.match(p);
