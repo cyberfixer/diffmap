@@ -67,6 +67,19 @@
 
 ## Next
 
+### 22. Smarter name matching (no compiler)
+Goal: fewer wrong and missing call links in typed languages (Java, Kotlin, Swift, C#, Scala, Go, Rust, C++), staying as light as today: same single pass over the files, no build, no new dependencies. One commit per step, each with tests.
+
+- **22.0 Measure first.** A small script that runs the tree-sitter graph on a repo and counts calls linked to exactly one target, to several, or dropped. Run it on one real Java repo and one Swift repo before and after each step.
+- **22.1 Field and property types.** `private OrderRepo repo;` / `private let repo: Repo` / `class A(private val repo: Repo)` → `repo.save()` and `this.repo.save()` link to `OrderRepo.save` only. When the variable is not found in the calling method, look in its enclosing class too; treat `this.x` / `self.x` as `x`. (`narrow()` in tree-sitter-call-graph.ts, `typeOfVariable` in visibility.ts.)
+- **22.2 Missing definitions.** Swift: `init`, protocol methods, computed properties, `subscript`. Kotlin: secondary constructors, properties with getters. Java: method references (`this::check`, `Order::total`) count as calls. (languages.ts.)
+- **22.3 Interface → implementation.** Read each class's parent types (`implements` / `extends` in Java, `: Repo` in Swift and Kotlin, base list in C#, `extends`/`with` in Scala, `impl Trait for` in Rust). For a method `C.m` whose parent `P` (visible from C's file) has `P.m`, add an "implements" link. The walk and the page already handle these links (dashed arrows), as with SCIP.
+- **22.4 Return types.** Remember each method's declared return type (`Order find()`, `func find() -> Order`, `fun find(): Order`). Then `var o = repo.find(); o.total()` and chains like `a.getB().run()` resolve, at most 3 steps deep. Generic wrappers are left as they are (`List<Order>` stays `List`).
+- **22.5 Overloads by argument count.** When several classes have a method with the same name, keep the ones whose parameter count fits the call (lenient for default and variadic parameters). Overloads within one class stay one symbol, as today.
+- **22.6 Same-name classes.** When two `Order` classes are both reachable, prefer the one matching the full import (`import com.x.Order` → `com/x/Order.java`). Java, Kotlin, Scala.
+
+After each step, the "Planned" column in the README languages table is updated.
+
 ### 4. `type` aliases are not symbols (rest of item 4)
 - Interfaces and enums are symbols now; TypeScript `type X = ...` still falls into `top-level`.
 
@@ -98,4 +111,4 @@
 
 ## Suggested order
 
-Then the real tests above. Then 4 → 16 → 17, which make day-to-day reviews more accurate. 19, 7, 9 and 20 after that, in any order.
+Then the real tests above. Then 22 (in step order), then 4 → 16 → 17, which make day-to-day reviews more accurate. 19, 7, 9 and 20 after that, in any order.
