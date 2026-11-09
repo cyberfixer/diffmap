@@ -20,6 +20,9 @@ services:
       - diffmap-data:/data
       # If the host uses an internal CA, mount it and set the CA paths in .env:
       # - ./certs:/certs:ro
+    # Cap the container's memory: about ANALYSIS_WORKERS x ANALYSIS_MEMORY_MB
+    # + 200 MB (defaults: 2 x 2048 MB).
+    # mem_limit: 4500m
     # If the code host is on your LAN under a name the container can't resolve:
     # extra_hosts:
     #   - "gitlab.lan:192.168.1.10"

@@ -184,6 +184,7 @@ For a second host, run it again with another name, port, volume and settings fil
 | `CACHE_DIR` | Where project code is kept (default `$DATA_DIR/repos`) |
 | `CACHE_MAX_GB` | Disk limit for project code (default `15`, `0` = no limit). Above it, projects not opened for the longest time are removed; they download again when next opened |
 | `ANALYSIS_WORKERS` | Reviews analysed at the same time (default `2`; about one per CPU core is fine if memory allows) |
+| `ANALYSIS_MEMORY_MB` | Memory limit of each analysis (default `2048`). The container needs at most about `ANALYSIS_WORKERS` × this + 200 MB |
 | `INDEX_JOB`, `INDEX_ARTIFACT` | CI job (GitLab) or Actions artifact (GitHub) with the exact index (default `diffmap-index`, `index.scip`) |
 | `NODE_EXTRA_CA_CERTS`, `GIT_SSL_CAINFO` | Path to your CA file if the host uses an internal certificate |
 

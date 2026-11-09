@@ -242,7 +242,7 @@ sequenceDiagram
 | GitLab API | [gitlab/gitlab-client.ts](src/infrastructure/gitlab/gitlab-client.ts) | MR details, discussions, new comments, replies, approvals, and finding the CI index, all **as the signed-in user**. |
 | Code | [git/git-repo-cache.ts](src/infrastructure/git/git-repo-cache.ts) | One bare git repo per project on the data volume. Fetches only the target branch and the review's ref (see the table above), with the user's token. Reports git's progress. |
 | Jobs and cache | [review-merge-request.ts](src/application/use-cases/review-merge-request.ts) | Getting an MR ready runs as a background job with a status the progress screen polls. Results are cached per `project@base..head` (last 20). Without an index, it looks again after a minute in case CI finished. |
-| Worker threads | [worker/](src/infrastructure/worker/) | The analysis is heavy, synchronous work; it runs in worker threads (`ANALYSIS_WORKERS`, default 2) so the server keeps answering everyone else. |
+| Worker threads | [worker/](src/infrastructure/worker/) | The analysis is heavy, synchronous work; it runs in worker threads (`ANALYSIS_WORKERS`, default 2, each limited to `ANALYSIS_MEMORY_MB`, default 2048) so the server keeps answering everyone else and one huge change cannot take it down. |
 | Routes | [server/server.ts](src/interfaces/server/server.ts) | Pages, sign-in, the MR page, and the JSON API used by the page (`/api/<project>/-/merge_requests/<iid>/…`: discussions, notes, approve, unapprove, viewed, status). In view-only mode the write routes answer 403 and the page has no comment box or Approve button. |
 | Pages | [server/pages.ts](src/interfaces/server/pages.ts) | Sign-in, start page, errors, the progress screen. |
 | Logs | [server/safe-log.ts](src/interfaces/server/safe-log.ts) | Every log line passes through it: no query strings, sign-in codes or tokens are ever written. |
@@ -259,7 +259,7 @@ one in GitLab, so it becomes a general comment that quotes `file:line` and the c
 |---|---|---|
 | Sessions, GitLab tokens | memory of the server | until sign-out or restart |
 | Project code (bare git repos) | `CACHE_DIR` (default `/data/repos`) | only new commits fetched; least recently used projects removed above `CACHE_MAX_GB` (default 15); review refs older than 30 days dropped |
-| Analyses | memory, last 20 MR versions | until restart |
+| Analyses | memory, the 20 most recently opened MR versions | until restart |
 | "Viewed" ticks on the service | `DATA_DIR/viewed.json`, per GitLab user and MR | kept |
 | "Viewed" ticks in a CLI report | the browser (localStorage) | per browser |
 | Theme choice | the browser (localStorage `diffmap:theme`) | per browser |

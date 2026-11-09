@@ -388,6 +388,41 @@ describe("ReviewMergeRequestUseCase", () => {
     }
   });
 
+  it("tries again after a failure seen while waiting", async () => {
+    let attempts = 0;
+    const uc = new ReviewMergeRequestUseCase(
+      { prepare: async () => { if (++attempts === 1) throw new Error("GitLab is down"); return "/repo"; } },
+      () => ({ base: "b", head: "h", symbols: [], nodes: [], edges: [], files: [] }),
+    );
+    const { host } = fakeHost();
+    await expect(uc.open(host, "t", "team/api", 42, { wait: true })).rejects.toThrow("GitLab is down");
+    expect((await uc.open(host, "t", "team/api", 42, { wait: true })).ready).toBe(true);
+    expect(attempts).toBe(2);
+  });
+
+  it("keeps the most recently opened analyses when the cache is full", async () => {
+    let runs = 0;
+    let current = mr;
+    const uc = new ReviewMergeRequestUseCase(
+      { prepare: async () => "/repo" },
+      () => (runs++, { base: "b", head: "h", symbols: [], nodes: [], edges: [], files: [] }),
+    );
+    const { host } = fakeHost();
+    host.getMergeRequest = async () => current;
+    const openSha = async (head: string) => {
+      current = { ...mr, diffRefs: { ...mr.diffRefs, headSha: head } };
+      await uc.open(host, "t", "team/api", 42, { wait: true });
+    };
+    for (let i = 0; i < 20; i++) await openSha(`h${i}`); // full
+    await openSha("h0"); // opened again: now the most recent
+    await openSha("new"); // pushes out h1, the one unopened longest
+    expect(runs).toBe(21);
+    await openSha("h0");
+    expect(runs).toBe(21);
+    await openSha("h1");
+    expect(runs).toBe(22);
+  });
+
   it("reports a failure once, then tries again", async () => {
     let attempts = 0;
     const uc = new ReviewMergeRequestUseCase(

@@ -91,7 +91,13 @@ export class ReviewMergeRequestUseCase {
   ): Promise<MergeRequestReview | { ready: false; mr: MergeRequestInfo; status: PreparingStatus }> {
     // Read the MR first: this also checks the user may see the project.
     const mr = await host.getMergeRequest(projectPath, iid);
-    let cached = this.cache.get(keyOf(mr));
+    const key = keyOf(mr);
+    let cached = this.cache.get(key);
+    if (cached) {
+      // Most recently opened last: when full, the one unopened longest goes.
+      this.cache.delete(key);
+      this.cache.set(key, cached);
+    }
     // Analysed without an index? See whether CI has made one since.
     if (cached && cached.indexState !== "found" && cached.indexState !== "unsupported" && Date.now() - cached.checkedAt > RECHECK_MS) {
       cached.checkedAt = Date.now();
@@ -100,19 +106,29 @@ export class ReviewMergeRequestUseCase {
       if (look.state === "found") {
         const job = this.start(mr, token, host, look);
         if (!opts.wait) return { ready: false, mr, status: job.status };
-        cached = await job.promise;
+        cached = await this.settle(key, job);
       }
     }
     if (!cached) {
       const job = this.start(mr, token, host);
       if (!opts.wait) return { ready: false, mr, status: job.status };
-      cached = await job.promise;
+      cached = await this.settle(key, job);
     }
     const [discussions, approvals] = await Promise.all([
       host.listDiscussions(mr.projectPath, iid),
       host.getApprovals(mr.projectPath, iid),
     ]);
     return { ready: true, mr, result: cached.result, discussions, approvals, indexState: cached.indexState };
+  }
+
+  /** Wait for a job; if it failed, forget it so the next visit tries again. */
+  private async settle(key: string, job: Job): Promise<Cached> {
+    try {
+      return await job.promise;
+    } catch (err) {
+      if (this.jobs.get(key) === job) this.jobs.delete(key);
+      throw err;
+    }
   }
 
   /** Progress of getting an MR ready; starts (or retries) the work if needed. */

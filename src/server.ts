@@ -22,7 +22,7 @@ try {
 
 // Sign-ins are kept in memory: a restart signs everyone out.
 const sessions = new SessionStore();
-const analyzer = new WorkerAnalyzer(config.analysisWorkers);
+const analyzer = new WorkerAnalyzer(config.analysisWorkers, config.analysisMemoryMb);
 setInterval(() => sessions.sweep(), 3600_000).unref();
 
 const app = createApp({

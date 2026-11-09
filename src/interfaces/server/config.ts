@@ -18,6 +18,7 @@ export interface ServerConfig {
   cacheMaxBytes: number; // above this, least recently used projects are removed
   dataDir: string; // "viewed" marks (and the repo cache by default)
   analysisWorkers: number; // analyses that may run at the same time
+  analysisMemoryMb: number; // heap limit of each analysis
   indexJob: string; // CI job (GitLab) or artifact (GitHub Actions) with the exact index
   indexArtifact: string; // the index file inside it
 }
@@ -56,6 +57,7 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ServerConfi
     cacheDir: env.CACHE_DIR ?? `${env.DATA_DIR ?? "/data"}/repos`,
     cacheMaxBytes: gigabytes(env.CACHE_MAX_GB, 15),
     analysisWorkers: Math.max(1, Number(env.ANALYSIS_WORKERS ?? 2) || 2),
+    analysisMemoryMb: Math.max(256, Number(env.ANALYSIS_MEMORY_MB ?? 2048) || 2048),
     indexJob: env.INDEX_JOB ?? "diffmap-index",
     indexArtifact: env.INDEX_ARTIFACT ?? "index.scip",
   };
