@@ -53,7 +53,13 @@ export const STYLE = `
   .pill.warn { color:var(--del-fg); border-color:var(--del-edge); background:var(--del-bg); }
 
   /* ── three panels ── */
-  .panes { flex:1; min-height:0; display:grid; grid-template-columns:minmax(220px, 280px) minmax(0, 1fr) minmax(280px, 360px); }
+  .panes { --lw:280px; --rw:360px; position:relative; flex:1; min-height:0; display:grid;
+           grid-template-columns:var(--lw) minmax(0, 1fr) var(--rw); }
+  .rz { position:absolute; top:0; bottom:0; z-index:6; width:8px; cursor:col-resize; touch-action:none; }
+  .rz.l { left:calc(var(--lw) - 4px); }
+  .rz.r { right:calc(var(--rw) - 4px); }
+  .rz:hover, .rz.on { background:linear-gradient(var(--accent), var(--accent)) center / 2px 100% no-repeat; }
+  body.resizing, body.resizing * { cursor:col-resize !important; user-select:none; }
   aside.side { background:var(--side); border-right:1px solid var(--line); display:flex; flex-direction:column; min-height:0; }
   .side-head { display:flex; justify-content:space-between; align-items:baseline; padding:16px 20px 8px; }
   .side-head h2 { margin:0; font-size:14px; font-weight:600; }
@@ -109,6 +115,8 @@ export const STYLE = `
         border:1px solid var(--line); border-radius:12px; background-color:var(--panel);
         background-image:radial-gradient(var(--dots) 1px, transparent 1px); background-size:16px 16px; }
   #vp.drag { cursor:grabbing; }
+  .dl.call { cursor:pointer; }
+  .dl.call:hover { box-shadow:inset 0 0 0 1px var(--line-strong); }
   #vp.autoscroll, #vp.autoscroll * { cursor:all-scroll !important; user-select:none; }
   .auto-mark { position:absolute; z-index:5; width:28px; height:28px; margin:-14px 0 0 -14px; border-radius:50%;
                border:1px solid var(--line-strong); background:var(--panel); pointer-events:none;
@@ -263,6 +271,7 @@ export const STYLE = `
   @media (max-width: 1100px) {
     body { overflow:auto; }
     .panes { grid-template-columns:minmax(0, 1fr); }
+    .rz { display:none; }
     aside.side { border-right:0; border-bottom:1px solid var(--line); max-height:40vh; }
     main.map { min-height:70vh; }
     aside.detail { border-left:0; border-top:1px solid var(--line); }

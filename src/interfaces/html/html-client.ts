@@ -23,6 +23,18 @@ export const CLIENT_SCRIPT = `
   }
   function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
 
+  // The rows that call a changed symbol, and which symbols they call.
+  var callsOn = {};
+  syms.forEach(function (sy, k) {
+    sy.refs.forEach(function (r) {
+      var el = byId(r.el);
+      if (!el || el.classList.contains('def')) return;
+      (callsOn[r.el] = callsOn[r.el] || []).indexOf(k) < 0 && callsOn[r.el].push(k);
+      el.classList.add('call');
+      el.title = 'Go to ' + (callsOn[r.el].map(function (j) { return syms[j].name; }).join(', '));
+    });
+  });
+
   // The row where each changed symbol starts.
   var defRow = {};
   qa('[data-defs]').forEach(function (r) {
@@ -182,6 +194,44 @@ export const CLIENT_SCRIPT = `
     moved = true; // the click that ends autoscroll is not a selection
   }
 
+  // ── resizable side panels (widths kept in this browser) ──
+  (function () {
+    var panes = byId('panes'), KEY = 'diffmap:panes';
+    if (!panes) return;
+    var w = {};
+    try { w = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (err) { w = {}; }
+    function set(side, px) {
+      var other = side === 'l' ? w.r || 360 : w.l || 280;
+      var max = Math.max(200, panes.clientWidth - other - 320); // leave the map at least 320px
+      px = Math.round(Math.max(side === 'l' ? 160 : 240, Math.min(max, px)));
+      w[side] = px;
+      panes.style.setProperty(side === 'l' ? '--lw' : '--rw', px + 'px');
+    }
+    function save() { try { localStorage.setItem(KEY, JSON.stringify(w)); } catch (err) { /* private mode */ } }
+    if (w.l) set('l', w.l);
+    if (w.r) set('r', w.r);
+    ['l', 'r'].forEach(function (side) {
+      var hd = byId('rz' + side);
+      hd.addEventListener('pointerdown', function (e) {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        hd.setPointerCapture(e.pointerId);
+        hd.classList.add('on'); document.body.classList.add('resizing');
+        var box = panes.getBoundingClientRect();
+        function move(ev) { set(side, side === 'l' ? ev.clientX - box.left : box.right - ev.clientX); draw(); }
+        function up() {
+          hd.removeEventListener('pointermove', move); hd.removeEventListener('pointerup', up);
+          hd.classList.remove('on'); document.body.classList.remove('resizing');
+          save(); draw();
+        }
+        hd.addEventListener('pointermove', move); hd.addEventListener('pointerup', up);
+      });
+      hd.addEventListener('dblclick', function () {
+        delete w[side]; panes.style.removeProperty(side === 'l' ? '--lw' : '--rw'); save(); draw();
+      });
+    });
+  })();
+
   byId('fit').onclick = fit;
   byId('zin').onclick = function () { centre(1.2); };
   byId('zout').onclick = function () { centre(1 / 1.2); };
@@ -224,9 +274,19 @@ export const CLIENT_SCRIPT = `
     if (big) { big.closest('.card').classList.remove('big'); relayout(); return; }
     var ex = e.target.closest('.expand');
     if (ex) { wholeFile(ex); return; }
+    if (window.getSelection().toString()) return;
     var row = e.target.closest('.dl.def');
-    if (row && !window.getSelection().toString()) toggle(Number(row.dataset.sel), false);
+    if (row) { toggle(Number(row.dataset.sel), false); return; }
+    var call = e.target.closest('.dl.call');
+    if (call && !(D.mr && e.target.closest('.lo, .ln'))) goToDef(call); // in a merge request the line number starts a comment
   });
+  /** Clicking a line that calls a changed symbol selects that symbol and jumps to its definition. */
+  function goToDef(row) {
+    var ks = callsOn[row.id];
+    // Several changed symbols called on one line: step through them on each click.
+    var i = ks.indexOf(sel), k = ks[(i + 1) % ks.length];
+    select(k, true);
+  }
   qa('.sf-sym').forEach(function (b) {
     b.addEventListener('click', function () { toggle(Number(b.dataset.sel), true); });
   });

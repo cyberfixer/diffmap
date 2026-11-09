@@ -444,7 +444,9 @@ export function renderHtml(
     ${mrPage ? mrActions(mrPage) : ""}
   </div>
 </header>
-<div class="panes">
+<div class="panes" id="panes">
+  <div class="rz l" id="rzl" title="Drag to resize · double-click to reset" aria-hidden="true"></div>
+  <div class="rz r" id="rzr" title="Drag to resize · double-click to reset" aria-hidden="true"></div>
   <aside class="side">
     <div class="side-head"><h2>Changed files</h2><span>${views.length}</span></div>
     <div class="side-list">${sidebar}</div>
@@ -488,7 +490,7 @@ export function renderHtml(
       <span><span class="ln-s"></span>Used by</span>
       <span><span class="ln-i"></span>Implemented by</span>
       <span><span class="ln-r"></span>Call to removed code</span>
-      <span style="margin-left:auto;color:var(--muted)">drag or scroll to move · ctrl+scroll to zoom · Esc clears selection</span>
+      <span style="margin-left:auto;color:var(--muted)">drag or scroll to move · ctrl+scroll to zoom · click a usage line to go to its definition · Esc clears selection</span>
     </div>
   </main>
   <aside class="detail" id="detail">
