@@ -11,6 +11,20 @@ const simple = (name: string): string => name.split(".").pop()!;
 const owner = (name: string): string => name.split(".").slice(0, -1).join(".");
 const ownerSimple = (name: string): string => simple(owner(name) || "");
 
+/** How each call in the repo was linked (for measuring the matching rules). */
+export interface LinkStats {
+  calls: number;
+  /** No symbol of that name in the repo: a library or built-in call. */
+  external: number;
+  one: number;
+  several: number;
+  /** More than MAX_TARGETS candidates left: not drawn. */
+  tooMany: number;
+  /** Symbols of that name exist, but none the caller can reach. */
+  unreachable: number;
+  implementsLinks: number;
+}
+
 /**
  * Call graph by name, narrowed to what the calling code can actually reach:
  * - `self.x()` / `this.x()` -> x in the same class;
@@ -27,12 +41,18 @@ export class TreeSitterCallGraph implements CallGraphPort {
   }
 
   build(input: CallGraphInput): CallGraphResult {
+    const { meta, linesOf, collector } = this.link(input.files, input.removed);
+    return walkNeighbourhood({ meta, linesOf, calls: collector.calls, changedIds: input.changedIds, depth: input.depth });
+  }
+
+  /** Every symbol in the files and every call between them, plus how each call was linked. */
+  link(files: CallGraphInput["files"], removed: CallGraphInput["removed"] = []) {
     const meta = new Map<string, GraphNode>();
     const linesOf = new Map<string, string[]>();
     const byName = new Map<string, string[]>();
     const calls: (FoundCall & { file: string })[] = [];
 
-    for (const f of input.files) {
+    for (const f of files) {
       const { symbols, calls: found } = this.engine.outline(f.path, f.source);
       linesOf.set(f.path, f.source.split("\n").map((l) => l.replace(/\r$/, "")));
       for (const s of symbols) {
@@ -44,20 +64,27 @@ export class TreeSitterCallGraph implements CallGraphPort {
       }
       for (const c of found) calls.push({ file: f.path, ...c });
     }
-    const visibility = new Visibility(input.files);
+    const visibility = new Visibility(files);
 
     const removedByName = new Map<string, string[]>();
-    for (const r of input.removed) {
+    for (const r of removed) {
       const key = simple(r.name);
       removedByName.set(key, [...(removedByName.get(key) ?? []), r.id]);
     }
 
+    const stats: LinkStats = { calls: 0, external: 0, one: 0, several: 0, tooMany: 0, unreachable: 0, implementsLinks: 0 };
     const collector = new CallCollector();
     for (const c of calls) {
       const from = `${c.file}#${c.from}`;
       const text = linesOf.get(c.file)?.[c.line - 1] ?? "";
       const all = (byName.get(c.name) ?? []).filter((id) => id !== from);
       const targets = this.narrow(all, c, from, meta, linesOf, visibility);
+      stats.calls++;
+      if (all.length === 0) stats.external++;
+      else if (targets.length === 0) stats.unreachable++;
+      else if (targets.length === 1) stats.one++;
+      else if (targets.length <= MAX_TARGETS) stats.several++;
+      else stats.tooMany++;
       if (targets.length > 0 && targets.length <= MAX_TARGETS) {
         for (const to of targets) collector.add(from, to, "calls", c.line, text);
       } else if (all.length === 0) {
@@ -65,8 +92,7 @@ export class TreeSitterCallGraph implements CallGraphPort {
         for (const to of removedByName.get(c.name) ?? []) collector.add(from, to, "calls-removed", c.line, text);
       }
     }
-
-    return walkNeighbourhood({ meta, linesOf, calls: collector.calls, changedIds: input.changedIds, depth: input.depth });
+    return { meta, linesOf, collector, stats };
   }
 
   /** Keep only the targets the call can reach (see the class comment). */
