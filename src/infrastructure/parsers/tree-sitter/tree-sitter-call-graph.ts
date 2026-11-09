@@ -106,6 +106,8 @@ export class TreeSitterCallGraph implements CallGraphPort {
         });
         if (fits.length) targets = fits;
       }
+      // Several left (two classes named Order): the one the file imports.
+      targets = visibility.preferImported(c.file, targets, (id) => meta.get(id)!.file);
       const outcome: LinkOutcome =
         all.length === 0 ? "external"
         : narrowed === null ? "libraryType"

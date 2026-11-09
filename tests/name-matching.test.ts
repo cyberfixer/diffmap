@@ -389,3 +389,38 @@ describe("overloads by argument count (roadmap 22.5)", () => {
     expect(callersOf(files, "app/sms.py#Sms.send")).toEqual(["app/use.py#a"]);
   });
 });
+
+describe("same-named classes (roadmap 22.6)", () => {
+  const two = {
+    "src/com/shop/order/Order.java": "package com.shop.order;\nclass Order {\n  int total() { return 1; }\n}\n",
+    "src/com/shop/legacy/Order.java": "package com.shop.legacy;\nclass Order {\n  int total() { return 2; }\n}\n",
+  };
+
+  it("Java: the class the file imports", () => {
+    const files = {
+      ...two,
+      "src/com/shop/web/Use.java": "package com.shop.web;\nimport com.shop.order.Order;\nclass Use {\n  int a(Order o) { return o.total(); }\n}\n",
+    };
+    expect(callersOf(files, "src/com/shop/order/Order.java#Order.total")).toEqual(["src/com/shop/web/Use.java#Use.a"]);
+    expect(callersOf(files, "src/com/shop/legacy/Order.java#Order.total")).toEqual([]);
+  });
+
+  it("Java: a wildcard import picks the package", () => {
+    const files = {
+      ...two,
+      "src/com/shop/web/Use.java": "package com.shop.web;\nimport com.shop.legacy.*;\nclass Use {\n  int a(Order o) { return o.total(); }\n}\n",
+    };
+    expect(callersOf(files, "src/com/shop/legacy/Order.java#Order.total")).toEqual(["src/com/shop/web/Use.java#Use.a"]);
+    expect(callersOf(files, "src/com/shop/order/Order.java#Order.total")).toEqual([]);
+  });
+
+  it("Python: from app.models import Order", () => {
+    const files = {
+      "app/models.py": "class Order:\n    def total(self):\n        return 1\n",
+      "old/models.py": "class Order:\n    def total(self):\n        return 2\n",
+      "app/use.py": "from app.models import Order\nfrom old import models\n\ndef a():\n    return Order().total()\n",
+    };
+    expect(callersOf(files, "app/models.py#Order.total")).toEqual(["app/use.py#a"]);
+    expect(callersOf(files, "old/models.py#Order.total")).toEqual([]);
+  });
+});

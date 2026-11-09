@@ -33,6 +33,38 @@ export class Visibility {
     }
   }
 
+  /**
+   * Of several targets, those the file imports by full path: `import com.x.Order` -> com/x/Order.java,
+   * `import com.x.*` / `using App.Models` -> files in com/x / App/Models, `from app.models import X` ->
+   * app/models.py. All of them when none (or every one) matches.
+   */
+  preferImported<T>(from: string, targets: T[], fileOf: (t: T) => string): T[] {
+    if (targets.length < 2) return targets;
+    const paths = this.importPaths(from);
+    if (!paths.length) return targets;
+    const at = (path: string) => paths.some((p) => path === p || path.endsWith("/" + p));
+    const noExt = (t: T) => fileOf(t).replace(/\.[^./]+$/, "");
+    // The file itself first (import com.x.Order), then its folder (import com.x.*).
+    for (const kept of [targets.filter((t) => at(noExt(t))), targets.filter((t) => at(posix.dirname(noExt(t))))]) {
+      if (kept.length && kept.length < targets.length) return kept;
+    }
+    return targets;
+  }
+
+  private readonly importPathCache = new Map<string, string[]>();
+
+  private importPaths(file: string): string[] {
+    const cached = this.importPathCache.get(file);
+    if (cached) return cached;
+    const out: string[] = [];
+    for (const line of (this.importText.get(file) ?? "").split("\n")) {
+      const m = /^\s*(?:import|from|using|use)\s+(?:static\s+)?([\w.:\\]+)/.exec(line);
+      if (m) out.push(m[1].replace(/::|\.|\\/g, "/").replace(/\/+$/, ""));
+    }
+    this.importPathCache.set(file, out);
+    return out;
+  }
+
   canSee(from: string, target: string): boolean {
     if (from === target || posix.dirname(from) === posix.dirname(target)) return true;
     const imports = this.importText.get(from) ?? "";

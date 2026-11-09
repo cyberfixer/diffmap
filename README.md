@@ -16,27 +16,24 @@ There are two ways to use it:
 
 ## Languages
 
-| Language | Finds | Calls | Exact with a [CI index](#exact-calls-from-ci) | Planned |
-|---|---|---|---|---|
-| TypeScript | everything | **exact** (TypeScript compiler) | — | — |
-| JavaScript | functions, classes, methods, arrow functions | matched by name | ✅ scip-typescript | — |
-| Java | classes, records, interfaces, enums, methods, constructors, method references | matched by name | ✅ scip-java | imports |
-| Kotlin | classes, interfaces, enums, objects, functions, constructors, properties with a getter | matched by name | ✅ scip-java | — |
-| Swift | classes, structs, enums, protocols and their methods, extensions, functions, `init`, computed properties, subscripts | matched by name | — | — |
-| C# | classes, records, structs, interfaces, enums, methods, constructors, properties with code | matched by name | — | — |
-| Scala | classes, objects, traits, functions | matched by name | — | — |
-| Go | functions, methods, structs, interfaces | matched by name | — | — |
-| Rust | functions, structs, enums, traits, impl blocks | matched by name | — | — |
-| C++ | functions, classes, structs, namespaces | matched by name | ✅ scip-clang | — |
-| C | functions, structs | matched by name | ✅ scip-clang | — |
-| Python | functions, classes | matched by name | — | — |
-| PHP | classes, interfaces, traits, enums, methods, functions | matched by name | — | — |
-| Ruby | classes, modules, methods | matched by name | — | — |
-| Angular templates | components, directives, pipes | [linked from templates](#angular) | — | — |
-| Anything else (YAML, SQL, Markdown…) | shown as plain diff cards | — | — | — |
-
-"Planned" improves name matching without a compiler: pick the right class when
-two share a name.
+| Language | Finds | Calls | Exact with a [CI index](#exact-calls-from-ci) |
+|---|---|---|---|
+| TypeScript | everything | **exact** (TypeScript compiler) | — |
+| JavaScript | functions, classes, methods, arrow functions | matched by name | ✅ scip-typescript |
+| Java | classes, records, interfaces, enums, methods, constructors, method references | matched by name | ✅ scip-java |
+| Kotlin | classes, interfaces, enums, objects, functions, constructors, properties with a getter | matched by name | ✅ scip-java |
+| Swift | classes, structs, enums, protocols and their methods, extensions, functions, `init`, computed properties, subscripts | matched by name | — |
+| C# | classes, records, structs, interfaces, enums, methods, constructors, properties with code | matched by name | — |
+| Scala | classes, objects, traits, functions | matched by name | — |
+| Go | functions, methods, structs, interfaces | matched by name | — |
+| Rust | functions, structs, enums, traits, impl blocks | matched by name | — |
+| C++ | functions, classes, structs, namespaces | matched by name | ✅ scip-clang |
+| C | functions, structs | matched by name | ✅ scip-clang |
+| Python | functions, classes | matched by name | — |
+| PHP | classes, interfaces, traits, enums, methods, functions | matched by name | — |
+| Ruby | classes, modules, methods | matched by name | — |
+| Angular templates | components, directives, pipes | [linked from templates](#angular) | — |
+| Anything else (YAML, SQL, Markdown…) | shown as plain diff cards | — | — |
 
 "Matched by name" means a call to `update()` links to a function called `update`
 that the calling code can reach: `self.update()` / `this.update()` → the same
@@ -47,6 +44,7 @@ the same through calls and fields, using declared return types
 calls on a library type (`items.add()`) are left out;
 when several same-named methods are left, those that accept the number of
 arguments passed;
+of same-named classes, the one the file imports;
 a method the class inherits → the parent that declares it; otherwise the same
 file, then files it imports or shares a folder with. A method that implements an
 interface, protocol or trait method (or overrides a parent's) gets an
