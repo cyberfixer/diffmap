@@ -154,6 +154,8 @@ const CONSTRUCTORS = new Set(["__init__", "initialize", "constructor", "__constr
  */
 class TypeScope {
   private readonly typesByName = new Map<string, GraphNode[]>();
+  /** Types the repo defines or adds methods to (Swift `extension String { ... }`). */
+  private readonly repoTypes = new Set<string>();
   /** Lines of each type's members, so their local variables don't count as fields. */
   private readonly memberLines = new Map<string, [number, number][]>();
   private readonly cache = new Map<string, string | null>();
@@ -167,8 +169,10 @@ class TypeScope {
       if (TYPE_KINDS.has(n.kind)) {
         const key = simple(n.name);
         this.typesByName.set(key, [...(this.typesByName.get(key) ?? []), n]);
+        this.repoTypes.add(key);
       }
       const cls = owner(n.name);
+      if (cls) this.repoTypes.add(simple(cls));
       // Constructors stay: Python, Ruby, JS and PHP set their fields there (`self.repo = Repo()`).
       if (cls && !CONSTRUCTORS.has(simple(n.name)) && simple(n.name) !== simple(cls)) {
         const key = `${n.file}#${cls}`;
@@ -178,7 +182,7 @@ class TypeScope {
   }
 
   isRepoType(name: string): boolean {
-    return this.typesByName.has(name);
+    return this.repoTypes.has(name);
   }
 
   /** `this.repo` / `self.repo` / `$this->repo` / `@repo` -> "repo"; Go's `s` in `func (s *Svc)` -> "self". */

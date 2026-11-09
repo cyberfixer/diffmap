@@ -53,6 +53,44 @@ describe("tree-sitter symbols", () => {
     ]);
   });
 
+  it("Swift: structs, enums, extensions, protocol methods, init, computed properties, subscripts (roadmap 22.2)", () => {
+    const src = [
+      "protocol Repo {", //                      1
+      "  func save(_ o: Order) -> Bool", //       2
+      "}", //                                     3
+      "struct Order {", //                        4
+      "  let id: Int", //                         5
+      "  var total: Int {", //                    6
+      "    return 1", //                          7
+      "  }", //                                   8
+      "  init(id: Int) { self.id = id }", //      9
+      "  subscript(i: Int) -> Int { i }", //      10
+      "}", //                                     11
+      "enum Status { case a }", //                12
+      "extension Order: Repo {", //               13
+      "  func save(_ o: Order) -> Bool { true }", // 14
+      "}", //                                     15
+    ].join("\n");
+    expect(names("a.swift", src)).toEqual([
+      "interface Repo 1-3", "method Repo.save 2-2",
+      "struct Order 4-11", "method Order.total 6-8", "method Order.init 9-9", "method Order.subscript 10-10",
+      "enum Status 12-12",
+      "method Order.save 14-14",
+    ]);
+  });
+
+  it("Kotlin: interfaces, enums, secondary constructors, properties with a getter (roadmap 22.2)", () => {
+    const src = "interface Repo {\n  fun save()\n}\nenum class E { A }\nclass S(val r: Repo) {\n  constructor() : this(R())\n  val total: Int\n    get() = 1\n  val plain = 2\n}\n";
+    expect(names("a.kt", src)).toEqual([
+      "interface Repo 1-3", "method Repo.save 2-2", "enum E 4-4", "class S 5-10", "method S.constructor 6-6", "method S.total 7-8",
+    ]);
+  });
+
+  it("C#: properties with code, not auto-properties (roadmap 22.2)", () => {
+    const src = "class S {\n  public int Total { get { return Calc(); } }\n  public int Fast => Calc();\n  public int Auto { get; set; }\n}\n";
+    expect(names("a.cs", src)).toEqual(["class S 1-5", "method S.Total 2-2", "method S.Fast 3-3"]);
+  });
+
   it("ignores files of unknown languages", () => {
     expect(engine.symbols("notes.txt", "def x(): pass")).toEqual([]);
   });

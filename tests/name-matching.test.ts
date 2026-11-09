@@ -173,3 +173,33 @@ describe("field and property types (roadmap 22.1)", () => {
     expect(callersOf(files, "app/Box.java#Box.add")).toEqual([]);
   });
 });
+
+describe("missing definitions and calls (roadmap 22.2)", () => {
+  it("Java: method references count as calls", () => {
+    const files = {
+      "app/A.java": "class A {\n  void check(int x) {}\n  void run() { items.forEach(this::check); }\n}\n",
+      "app/Order.java": "class Order {\n  int total() { return 1; }\n}\n",
+      "app/B.java": "class B {\n  void run() { orders.map(Order::total); }\n}\n",
+    };
+    expect(callersOf(files, "app/A.java#A.check")).toEqual(["app/A.java#A.run"]);
+    expect(callersOf(files, "app/Order.java#Order.total")).toEqual(["app/B.java#B.run"]);
+  });
+
+  it("Swift: a type with extensions is one call target", () => {
+    const files = {
+      "app/Session.swift": "class Session {\n  init() {}\n}\n",
+      "app/Session+A.swift": "extension Session {\n  func a() {}\n}\n",
+      "app/Session+B.swift": "extension Session {\n  func b() {}\n}\n",
+      "app/Use.swift": "class Use {\n  func run() { let s = Session() }\n}\n",
+    };
+    expect(callersOf(files, "app/Session.swift#Session")).toEqual(["app/Use.swift#Use.run"]);
+  });
+
+  it("Swift: a method added to a library type by an extension is still linked", () => {
+    const files = {
+      "app/String+Slug.swift": "extension String {\n  func slug() -> String { self }\n}\n",
+      "app/Use.swift": "class Use {\n  func run(name: String) { name.slug() }\n}\n",
+    };
+    expect(callersOf(files, "app/String+Slug.swift#String.slug")).toEqual(["app/Use.swift#Use.run"]);
+  });
+});

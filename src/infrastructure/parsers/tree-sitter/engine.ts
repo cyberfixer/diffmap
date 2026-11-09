@@ -107,15 +107,17 @@ function listSymbols(root: Node, spec: LanguageSpec): Found[] {
         let kind = rule.kindOf?.(node) ?? rule.kind;
         if (kind === "function" && inType) kind = "method";
         const qualified = [...prefix, name].join(".");
-        if (!rule.containerOnly) {
+        const containerOnly = typeof rule.containerOnly === "function" ? rule.containerOnly(node) : !!rule.containerOnly;
+        if (!containerOnly) {
+          const last = rule.extendTo?.(node) ?? node;
           out.push({
-            info: { name: qualified, kind, range: { start: node.startPosition.row + 1, end: endLine(node) } },
+            info: { name: qualified, kind, range: { start: node.startPosition.row + 1, end: endLine(last) } },
             start: node.startIndex,
-            end: node.endIndex,
+            end: last.endIndex,
           });
         }
         nextPrefix = [...prefix, name];
-        nextInType = rule.containerOnly || CONTAINERS.has(kind);
+        nextInType = containerOnly || CONTAINERS.has(kind);
       }
     }
     for (const child of node.namedChildren) walk(child, nextPrefix, nextInType);

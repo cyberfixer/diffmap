@@ -13,7 +13,9 @@ export interface DefRule {
   /** Name of the definition; default: the "name" field, else the first identifier child. */
   name?: (n: Node) => string | null;
   /** Names nested definitions (Rust `impl Svc { fn x }` -> "Svc.x") but is not a symbol itself. */
-  containerOnly?: boolean;
+  containerOnly?: boolean | ((n: Node) => boolean);
+  /** The symbol also covers this later node (Kotlin puts a property's `get()` next to it, not inside). */
+  extendTo?: (n: Node) => Node | null;
 }
 
 /** How to find the called name in one kind of call node. */
@@ -58,6 +60,9 @@ function declaratorName(n: Node): string | null {
 
 const hasBody = (n: Node) => n.childForFieldName("body") !== null;
 
+/** True when the node has this keyword as a direct child (Kotlin `interface X`, `enum class X`). */
+const keyword = (n: Node, word: string) => n.children.some((c) => c.type === word);
+
 /**
  * Languages read with tree-sitter. TypeScript is not here: it keeps the more
  * exact TypeScript-compiler engine. Calls are matched by name (see the call graph).
@@ -101,7 +106,12 @@ export const LANGUAGES: LanguageSpec[] = [
       method_declaration: { kind: "method" },
       constructor_declaration: { kind: "method" },
     },
-    calls: { method_invocation: field("name"), object_creation_expression: field("type") },
+    calls: {
+      method_invocation: field("name"),
+      object_creation_expression: field("type"),
+      // this::check, Order::total -> the method; Foo::new -> the class
+      method_reference: (n) => lastName(n.namedChildren[n.namedChildren.length - 1] ?? null),
+    },
   },
   {
     id: "go",
@@ -139,6 +149,13 @@ export const LANGUAGES: LanguageSpec[] = [
       method_declaration: { kind: "method" },
       constructor_declaration: { kind: "method" },
       local_function_statement: { kind: "function" },
+      // int Total { get { ... } } / int Fast => ...; (not `{ get; set; }`)
+      property_declaration: {
+        kind: "method",
+        when: (n) =>
+          n.childForFieldName("value")?.type === "arrow_expression_clause" ||
+          (n.childForFieldName("accessors")?.namedChildren.some((a) => a.namedChildren.length > 0) ?? false),
+      },
     },
     calls: { invocation_expression: field("function"), object_creation_expression: field("type") },
   },
@@ -196,9 +213,25 @@ export const LANGUAGES: LanguageSpec[] = [
     id: "kotlin",
     extensions: [".kt", ".kts"],
     defs: {
-      class_declaration: { kind: "class", name: firstIdent },
+      class_declaration: {
+        kind: "class",
+        name: firstIdent,
+        kindOf: (n) => (keyword(n, "interface") ? "interface" : keyword(n, "enum") ? "enum" : "class"),
+      },
       object_declaration: { kind: "module", name: firstIdent },
       function_declaration: { kind: "function", name: firstIdent },
+      secondary_constructor: { kind: "method", name: () => "constructor" },
+      // val total: Int get() = ... (a property with code)
+      property_declaration: {
+        kind: "method",
+        when: (n) => /^(getter|setter)$/.test(n.nextNamedSibling?.type ?? ""),
+        name: (n) => n.namedChildren.find((c) => c.type === "variable_declaration")?.namedChildren[0]?.text ?? null,
+        extendTo: (n) => {
+          let last: Node | null = null;
+          for (let s = n.nextNamedSibling; s && /^(getter|setter)$/.test(s.type); s = s.nextNamedSibling) last = s;
+          return last;
+        },
+      },
     },
     calls: { call_expression: firstChild },
   },
@@ -206,9 +239,27 @@ export const LANGUAGES: LanguageSpec[] = [
     id: "swift",
     extensions: [".swift"],
     defs: {
-      class_declaration: { kind: "class" },
+      // class, struct, enum, actor; an extension only names what is inside it (Order.total)
+      class_declaration: {
+        kind: "class",
+        kindOf: (n) => {
+          const k = n.childForFieldName("declaration_kind")?.text;
+          return k === "struct" ? "struct" : k === "enum" ? "enum" : "class";
+        },
+        containerOnly: (n) => n.childForFieldName("declaration_kind")?.text === "extension",
+      },
       protocol_declaration: { kind: "interface" },
       function_declaration: { kind: "function" },
+      protocol_function_declaration: { kind: "method" },
+      init_declaration: { kind: "method", name: () => "init" },
+      deinit_declaration: { kind: "method", name: () => "deinit" },
+      subscript_declaration: { kind: "method", name: () => "subscript" },
+      // var total: Int { ... } (a computed property)
+      property_declaration: {
+        kind: "method",
+        when: (n) => n.childForFieldName("computed_value") !== null,
+        name: (n) => n.childForFieldName("name")?.childForFieldName("bound_identifier")?.text ?? null,
+      },
     },
     calls: { call_expression: firstChild },
   },
