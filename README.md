@@ -235,7 +235,7 @@ In full mode you can also:
   "Approve" review; GitHub has no "unapprove", so **Revoke approval** dismisses
   the review, which GitHub only allows for people with write access.
 
-In both modes, **Mark as viewed** tracks your progress per function. It is
+In both modes, the **Viewed** tick on each file tracks your progress. It is
 saved on the server for your user, so it stays after closing the browser.
 
 Good to know:
@@ -253,24 +253,34 @@ Good to know:
 
 ## The review page
 
+The page is laid out like a code editor.
+
 | Part | What it shows |
 |---|---|
-| **Top bar** | Title (the MR title, or the first commit), branches, commit count, lines added/removed, whether calls are exact. On the service also Approve, comment count and a link to GitLab. |
-| **Left** | Changed files as a folder tree (folders fold; a file's name is green when added, amber when modified, red when deleted), the functions changed in each with how often they are used, and your "viewed" progress. |
-| **Middle** | The map. Each changed file as a card, green for added lines and red for removed ones, unchanged lines folded. Click "⋯ unchanged lines" or **Whole file** to see more. Files over 500 lines (HTML over 300) start collapsed; click **Show**. |
-| **Right** | The selected function: where it is, how often it is used, and every place it is used, grouped by file, one line each. Click a place to jump to it. |
+| **Top bar** | Title (the MR title, or the first commit), branches and commit count. On the service also Approve and a link to GitLab. |
+| **Left** | Changed files as a folder tree (folders fold; a file's name is green when added, amber when modified, red when deleted), with the functions changed in each and how often they are used. Type in the box to filter. A ✓ marks files you have viewed. |
+| **Middle** | The code. Every changed file, one under the other, in one column you scroll like any page; the file's path stays pinned at the top while you are in it. Green for added lines and red for removed ones, unchanged lines folded. Click "⋯ unchanged lines" or **Whole file** to see more. Files over 500 lines (HTML over 300) start collapsed; click **Show**. |
+| **Bottom panel** | Opens when you select a function: every place it is used, grouped by file, and next to the list the code around the place you picked. |
+| **Status bar** | Lines added/removed, number of files and functions, whether calls are exact, and how many files you have viewed. |
 
-Select a function (in the list, or by clicking its line) and the map adds the
-code that uses it **from outside the change**, next to the function, each caller
-shown in full. Its definition and every line that uses it are highlighted (red
-when the line still calls code the change removes). No arrows: move around like
-in an editor instead. Click a line that uses a changed function to **go to its
-definition**; click a definition to **go to its usages**, the next one on each
-click. With nothing selected you see just the change.
+**Moving around.** The name of each changed function is underlined, on its
+definition and wherever it is used. Click a name where it is used to **go to its
+definition**. Click it on the definition to **list its usages** in the bottom
+panel; click again (or press F4, Shift+F4 to go back one) for the next usage.
+Usages inside the change scroll the code to that line. Usages **outside the
+change** are shown in the panel as the whole calling function. The definition and
+every line that uses it are highlighted (red when the line still calls code the
+change removes). **← Back** (Alt+←) returns to where you were before a jump, and
+Esc clears the selection. With nothing selected you see just the change.
 
-Drag or scroll to move the map, Ctrl+scroll to zoom, Esc to clear the selection.
+**Viewed files.** Tick **Viewed** in a file's header when you are done with it:
+the file collapses and is ticked in the tree. The arrow at the left of the header
+collapses or opens a file without marking it. In a report file the marks stay in
+your browser; on the service they are saved per person.
+
 The button in the top bar switches the colours between **Auto** (follows your
-system), **Light** and **Dark**; your choice is remembered in the browser.
+system), **Light** and **Dark**; your choice is remembered in the browser. Drag the edge of
+the left list or of the bottom panel to resize it.
 
 ---
 

@@ -40,7 +40,7 @@ different front doors to the same analysis.
 |---|---|---|
 | **base / head** | The two versions compared. *base* = before (e.g. `main`), *head* = after (your branch). | |
 | **diff line** | One line of the change: added (`add`), removed (`del`) or unchanged (`ctx`), with its line number in the old and/or new file. | [domain/symbol.ts](src/domain/symbol.ts) |
-| **file view** | A whole file as one list of lines: every line of the new file, with removed lines put back where they were. This is what a card on the map shows. | [domain/file-view.ts](src/domain/file-view.ts) |
+| **file view** | A whole file as one list of lines: every line of the new file, with removed lines put back where they were. This is what the review page shows for each changed file. | [domain/file-view.ts](src/domain/file-view.ts) |
 | **symbol** | A named piece of code: function, method, class, interface, enum, arrow function, Angular template… Its id is `file#Name`, e.g. `src/auth.ts#AuthService.login`. | [domain/symbol.ts](src/domain/symbol.ts) |
 | **changed symbol** | A symbol that contains changed lines, with a status: `added`, `removed` or `modified`. | |
 | **node** | A symbol on the map: either changed, or an unchanged neighbour (a caller or callee). | [domain/graph.ts](src/domain/graph.ts) |
@@ -170,9 +170,9 @@ server side (or in the CLI). The browser then only adds behaviour.
 
 ```mermaid
 flowchart LR
-  R["render-html.ts<br/>cards, sidebar, header<br/>+ a DIFFMAP data object"] --> P["the page"]
+  R["render-html.ts<br/>files, sidebar, header<br/>+ a DIFFMAP data object"] --> P["the page"]
   S["html-style.ts<br/>colours (light/dark), layout"] --> P
-  C["html-client.ts<br/>selection, go to definition/usages,<br/>folding, pan/zoom, viewed"] --> P
+  C["html-client.ts<br/>selection, go to definition/usages,<br/>usages panel, folding, viewed"] --> P
   M["html-client-mr.ts<br/>comments, replies, approve<br/>(service only)"] --> P
   T["theme.ts<br/>Auto / Light / Dark button"] --> P
 ```
@@ -183,10 +183,11 @@ flowchart LR
   for the selected symbol only. Each caller is shown whole.
 - **The `DIFFMAP` object** in the page holds, per changed symbol, its before/after
   lines and every place it is used, with the id of the row to highlight.
-- **[html-client.ts](src/interfaces/html/html-client.ts)** stacks the cards from
-  their measured heights (callers outside the change next to the selected
-  symbol), highlights the selected symbol's lines, moves between a definition
-  and its usages on click, and handles folding, pan/zoom and the "viewed" ticks.
+- **[html-client.ts](src/interfaces/html/html-client.ts)** underlines the name of
+  each changed symbol, highlights the selected symbol's lines, moves between a
+  definition and its usages on click, fills the usages panel under the code
+  (callers outside the change are shown there in full), and handles folding,
+  collapsing files and the per-file "viewed" ticks.
 - **[html-client-mr.ts](src/interfaces/html/html-client-mr.ts)** is added only on
   the service: comment threads under their lines, the comment box, Approve.
 
