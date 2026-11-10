@@ -138,6 +138,21 @@ describe("renderHtml", () => {
     expect(html).toContain('class="cbtn expand"');
   });
 
+  it("can open folded lines from the top or the bottom, and fold them all again", () => {
+    const html = renderHtml(result);
+    expect(html).toContain("gapButton('top'");
+    expect(html).toContain("gapButton('bottom'");
+    expect(html).toContain("Changes only");
+    expect(html).toMatch(/\.dl\.far:not\(\.shown\) \{ display:none/);
+  });
+
+  it("tells the script where each definition ends, and lists the keyboard shortcuts", () => {
+    const html = renderHtml(result);
+    expect(pageData(html).syms[0]).toMatchObject({ line: 4, end: 5 });
+    expect(html).toContain("<kbd>↑</kbd><kbd>↓</kbd> usages");
+    expect(html).toContain("<kbd>N</kbd><kbd>P</kbd> next / previous file");
+  });
+
   it("makes the line where a changed symbol starts clickable", () => {
     const html = renderHtml(result);
     expect(html).toMatch(/class="dl add def" id="L0-4" data-sel="0"/);

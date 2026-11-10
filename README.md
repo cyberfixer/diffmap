@@ -259,19 +259,30 @@ The page is laid out like a code editor.
 |---|---|
 | **Top bar** | Title (the MR title, or the first commit), branches and commit count. On the service also Approve and a link to GitLab. |
 | **Left** | Changed files as a folder tree (folders fold; a file's name is green when added, amber when modified, red when deleted), with the functions changed in each and how often they are used. Type in the box to filter. A ✓ marks files you have viewed. |
-| **Middle** | The code. Every changed file, one under the other, in one column you scroll like any page; the file's path stays pinned at the top while you are in it. Green for added lines and red for removed ones, unchanged lines folded. Click "⋯ unchanged lines" or **Whole file** to see more. Files over 500 lines (HTML over 300) start collapsed; click **Show**. |
-| **Bottom panel** | Opens when you select a function: every place it is used, grouped by file, and next to the list the code around the place you picked. |
-| **Status bar** | Lines added/removed, number of files and functions, whether calls are exact, and how many files you have viewed. |
+| **Middle** | The code. Every changed file, one under the other, in one column you scroll like any page; the file's path stays pinned at the top while you are in it. Green for added lines and red for removed ones, unchanged lines folded. On a bar of folded lines, open 20 from its top, 20 from its bottom, or all of them; **Whole file** opens everything and **Changes only** folds it all again, including lines you opened by hand. Files over 500 lines (HTML over 300) start collapsed; click **Show**. |
+| **Bottom panel** | Opens when you select a function: its definition, then every place it is used, grouped by file. Next to the list is the code for the line you picked. For the definition that is its first 12 lines, with a button to show the rest. |
+| **Status bar** | Lines added/removed, number of files and functions, whether calls are exact, the keyboard shortcuts, and how many files you have viewed. |
 
 **Moving around.** The name of each changed function is underlined, on its
-definition and wherever it is used. Click a name where it is used to **go to its
-definition**. Click it on the definition to **list its usages** in the bottom
-panel; click again (or press F4, Shift+F4 to go back one) for the next usage.
+definition and wherever it is used. Click a function in the left list, or its
+name where it is used, to **go to its definition**: the code scrolls to it and
+the bottom panel shows its first lines. Click the name on the definition to
+**list its usages** in the bottom panel; click again for the next usage.
 Usages inside the change scroll the code to that line. Usages **outside the
 change** are shown in the panel as the whole calling function. The definition and
 every line that uses it are highlighted (red when the line still calls code the
-change removes). **← Back** (Alt+←) returns to where you were before a jump, and
-Esc clears the selection. With nothing selected you see just the change.
+change removes). **← Back** returns to where you were before a jump. With
+nothing selected you see just the change.
+
+| Key | What it does |
+|---|---|
+| `↓` / `↑` | Next / previous stop (definition, then each usage) while a function is selected. With nothing selected the arrows scroll as usual. `F4` / `Shift+F4` do the same. |
+| `→` | Go to the selected function's definition |
+| `←` | Back to where you were before the last jump |
+| `N` / `P` | Next / previous file |
+| `V` | Mark the file at the top of the screen as viewed (or not viewed) |
+| `C` | Collapse or open that file |
+| `Esc` | Clear the selection and close the panel |
 
 **Viewed files.** Tick **Viewed** in a file's header when you are done with it:
 the file collapses and is ticked in the tree. The arrow at the left of the header

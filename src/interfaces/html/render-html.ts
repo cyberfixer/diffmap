@@ -197,6 +197,7 @@ interface SymInfo {
   status: string;
   file: string;
   line: number;
+  end: number; // last line of the definition (in the old file for a removed symbol)
   before: string[];
   after: string[];
   refs: Ref[];
@@ -222,6 +223,7 @@ export function renderHtml(
     .sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line || a.name.localeCompare(b.name));
   const kOf = new Map(changed.map((n, k) => [n.id, k]));
   const diffOf = new Map(result.symbols.map((s) => [s.id, s.diff]));
+  const endOf = new Map(result.symbols.map((s) => [s.id, (s.status === "removed" ? s.baseRange : s.headRange)?.end]));
 
   // Callers outside the diff: unchanged symbols in files that have no file view.
   const outCallers: GraphNode[] = [];
@@ -236,6 +238,7 @@ export function renderHtml(
       status: n.status ?? "modified",
       file: n.file,
       line: n.line,
+      end: Math.max(n.line, endOf.get(n.id) ?? n.endLine ?? n.line),
       before: diff.filter((l) => l.type === "del").map((l) => l.text),
       after: diff.filter((l) => l.type === "add").map((l) => l.text),
       refs: [],
@@ -322,7 +325,7 @@ export function renderHtml(
         if (!near[i] && (i === 0 || near[i - 1])) {
           let j = i;
           while (j < view.lines.length && !near[j]) j++;
-          rows.push(`<button class="gap" type="button" data-n="${j - i}">⋯ ${j - i} unchanged line${j - i === 1 ? "" : "s"}</button>`);
+          rows.push(`<div class="gap">⋯ ${j - i} unchanged line${j - i === 1 ? "" : "s"}</div>`);
           folded = true;
         }
         const defs = defsAt.get(i) ?? [];
@@ -464,9 +467,9 @@ export function renderHtml(
         <button class="dtab" id="tabu" type="button" aria-selected="true">Usages<em id="ucount">0</em></button>
         ${mrPage ? `<button class="dtab" id="tabc" type="button" aria-selected="false">Comments<em id="ccount">${mrPage.discussions.length}</em></button>` : ""}
         <div class="what" id="what"></div>
-        <button class="mini" id="back" type="button" disabled title="Back to where you were (Alt+←)">← Back</button>
-        <button class="mini" id="prevu" type="button" hidden title="Previous usage (Shift+F4)" aria-label="Previous usage">↑</button>
-        <button class="mini" id="nextu" type="button" hidden title="Next usage (F4)" aria-label="Next usage">↓</button>
+        <button class="mini" id="back" type="button" disabled title="Back to where you were (← or Alt+←)">← Back</button>
+        <button class="mini" id="prevu" type="button" hidden title="Previous usage (↑ or Shift+F4)" aria-label="Previous usage">↑</button>
+        <button class="mini" id="nextu" type="button" hidden title="Next usage (↓ or F4)" aria-label="Next usage">↓</button>
         <button class="mini" id="closed" type="button" hidden title="Close (Esc)" aria-label="Close panel">✕</button>
       </div>
       <div class="dpane" id="upane"><div class="ulist" id="ulist"></div><div class="prev" id="prev"></div></div>
@@ -479,6 +482,7 @@ export function renderHtml(
   <span>${views.length} file${views.length === 1 ? "" : "s"} · ${changed.length} symbol${changed.length === 1 ? "" : "s"}</span>
   ${outSummary}
   ${exactNote(result, mrPage?.indexState)}
+  <span class="keys" title="Keyboard shortcuts. The arrow keys move through usages while a symbol is selected; otherwise they scroll."><span><kbd>↑</kbd><kbd>↓</kbd> usages</span><span><kbd>→</kbd> definition</span><span><kbd>←</kbd> back</span><span><kbd>N</kbd><kbd>P</kbd> next / previous file</span><span><kbd>V</kbd> viewed</span><span><kbd>C</kbd> collapse</span><span><kbd>Esc</kbd> close</span></span>
   <span class="vprog">Viewed <span><span id="vcount">0</span> of ${views.length} file${views.length === 1 ? "" : "s"}</span><span class="bar"><span id="vbar"></span></span></span>
 </footer>
 <div id="outsrc" hidden>

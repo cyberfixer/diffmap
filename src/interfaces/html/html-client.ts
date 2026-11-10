@@ -78,7 +78,10 @@ export const CLIENT_SCRIPT = `
   function reveal(el) {
     if (!el || !ed.contains(el)) return;
     var sec = el.closest('.fsec');
-    if (sec && sec !== el) { sec.classList.remove('big'); setShut(sec, false); }
+    if (sec && sec !== el) {
+      sec.classList.remove('big'); setShut(sec, false);
+      if (hiddenRow(el)) { el.classList.add('shown'); regap(sec); }
+    }
     hist.push(ed.scrollTop);
     if (hist.length > 50) hist.shift();
     byId('back').disabled = false;
@@ -129,7 +132,8 @@ export const CLIENT_SCRIPT = `
   // ── selection ──
   function select(k, toDef) {
     var next = k === null || k === undefined || isNaN(k) ? null : k;
-    if (next !== sel) refAt = -1;
+    // refAt: -1 is the definition, 0.. are the usages. Going to the definition starts on it.
+    if (next !== sel || toDef) refAt = -1;
     sel = next;
     qa('.sf-sym').forEach(function (b) { b.classList.toggle('on', Number(b.dataset.sel) === sel); });
     qa('.dl.sel').forEach(function (r) { r.classList.remove('sel'); });
@@ -149,7 +153,7 @@ export const CLIENT_SCRIPT = `
         el.classList.add('hit');
         if (r.bad) el.classList.add('bad');
       });
-      if (refAt < 0 && syms[sel].refs.length) refAt = 0;
+      if (!toDef && refAt < 0 && syms[sel].refs.length) refAt = 0;
     }
     renderDock();
     if (sel !== null && toDef) reveal(defRow[sel]);
@@ -170,24 +174,25 @@ export const CLIENT_SCRIPT = `
     if (sel !== k) select(k, false);
     else step(1);
   }
+  /** Next (1) or previous (-1) stop: the definition, then each usage, then round again. */
   function step(d) {
     if (sel === null) return;
-    var n = syms[sel].refs.length;
-    if (!n) return;
-    refAt = (refAt + d + n) % n;
+    var n = syms[sel].refs.length + 1;
+    refAt = (refAt + 1 + d + n) % n - 1;
     showRef();
   }
-  /** Show the current usage: in the panel, and in the code when it is part of the diff. */
+  /** Show the current stop: in the panel, and in the code when it is part of the diff. */
   function showRef() {
     renderDock();
     var r = syms[sel].refs[refAt];
-    if (r && !r.out) reveal(byId(r.el));
+    if (refAt < 0) reveal(defRow[sel]);
+    else if (r && !r.out) reveal(byId(r.el));
   }
 
   document.addEventListener('click', function (e) {
     var t = e.target, x;
     if (!t.closest('#ed, #prev')) return;
-    if ((x = t.closest('.gap'))) { expandGap(x); return; }
+    if ((x = t.closest('.gap button'))) { openGap(x); return; }
     if ((x = t.closest('.bigbar'))) { x.closest('.fsec').classList.remove('big'); return; }
     if ((x = t.closest('.expand'))) { wholeFile(x); return; }
     if ((x = t.closest('.fold'))) { x = x.closest('.fsec'); setShut(x, !x.classList.contains('shut')); return; }
@@ -215,11 +220,33 @@ export const CLIENT_SCRIPT = `
   qa('.sf-file').forEach(function (b) {
     b.addEventListener('click', function () { reveal(byId(b.dataset.card)); });
   });
+
+  // ── keyboard (the status bar lists these) ──
+  /** The file at the top of the code area. */
+  function curFile() {
+    var top = ed.getBoundingClientRect().top + 1, cur = files[0];
+    files.forEach(function (sec) { if (sec.getBoundingClientRect().top <= top) cur = sec; });
+    return cur;
+  }
+  function fileStep(d) {
+    var i = files.indexOf(curFile()) + d;
+    if (i >= 0 && i < files.length) reveal(files[i]);
+  }
   document.addEventListener('keydown', function (e) {
-    var typing = /^(INPUT|TEXTAREA)$/.test(e.target.tagName);
-    if (e.key === 'Escape' && !typing && dock.classList.contains('open')) close();
-    if (e.key === 'F4' && sel !== null) { e.preventDefault(); step(e.shiftKey ? -1 : 1); }
-    if (e.key === 'ArrowLeft' && e.altKey && !typing) { e.preventDefault(); back(); }
+    var k = e.key;
+    if (k === 'F4' && sel !== null) { e.preventDefault(); step(e.shiftKey ? -1 : 1); return; }
+    if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.ctrlKey || e.metaKey) return;
+    if (k === 'Escape') { if (dock.classList.contains('open')) close(); return; }
+    if (k === 'ArrowLeft') { e.preventDefault(); back(); return; }
+    if (e.altKey || !files.length) return;
+    // With a symbol selected the arrows walk through its usages; otherwise they scroll as usual.
+    if (sel !== null && (k === 'ArrowDown' || k === 'ArrowUp')) { e.preventDefault(); step(k === 'ArrowDown' ? 1 : -1); return; }
+    if (sel !== null && k === 'ArrowRight') { e.preventDefault(); refAt = -1; showRef(); return; }
+    k = k.toLowerCase();
+    if (k === 'n') fileStep(1);
+    else if (k === 'p') fileStep(-1);
+    else if (k === 'v') curFile().querySelector('.fv').click();
+    else if (k === 'c') { var sec = curFile(); setShut(sec, !sec.classList.contains('shut')); }
   });
 
   // ── filter the explorer ──
@@ -255,7 +282,7 @@ export const CLIENT_SCRIPT = `
     byId('upane').hidden = tab !== 'u';
     byId('ucount').textContent = sel === null ? 0 : syms[sel].refs.length;
     byId('closed').hidden = !open;
-    byId('prevu').hidden = byId('nextu').hidden = !usages || syms[sel].refs.length < 2;
+    byId('prevu').hidden = byId('nextu').hidden = !usages || !syms[sel].refs.length;
 
     var what = byId('what');
     what.textContent = '';
@@ -263,7 +290,7 @@ export const CLIENT_SCRIPT = `
     if (lent) { outsrc.appendChild(lent); lent = null; }
     ulist.textContent = ''; prev.textContent = '';
     if (!usages) {
-      if (tab === 'u') what.textContent = 'Click an underlined name in the code, or a symbol in the list, to see where it is used';
+      if (tab === 'u') what.textContent = 'Click an underlined name in the code, or a symbol in the list, to see its definition and where it is used';
       return;
     }
 
@@ -284,9 +311,16 @@ export const CLIENT_SCRIPT = `
     if (nImpl) facts.push(plural(nImpl, 'implementation', 'implementations'));
     if (facts.length) what.appendChild(h('span', 'wf' + (sy.status === 'removed' && n ? ' bad' : ''), '· ' + facts.join(' · ')));
 
-    if (!n) { ulist.appendChild(h('div', 'none', 'Nothing calls this symbol.')); return; }
-
-    // Usages, grouped by file: one short line each.
+    // The definition first, then the usages grouped by file: one short line each.
+    ulist.appendChild(h('div', 'rf', 'Definition'));
+    var db = btn('ref' + (refAt < 0 ? ' on' : ''));
+    var dtext = defRow[sel] ? defRow[sel].querySelector('.tx').textContent.trim() : sy.name;
+    db.title = dtext;
+    db.appendChild(h('span', 'rn', String(sy.line)));
+    db.appendChild(h('span', 'rt', dtext));
+    db.addEventListener('click', function () { refAt = -1; showRef(); });
+    ulist.appendChild(db);
+    if (!n) ulist.appendChild(h('div', 'none', 'Nothing calls this symbol.'));
     var last = null;
     sy.refs.forEach(function (r, i) {
       if (r.file !== last) { ulist.appendChild(h('div', 'rf mono' + (r.out ? ' out' : ''), r.file)); last = r.file; }
@@ -300,20 +334,61 @@ export const CLIENT_SCRIPT = `
     });
     var on = ulist.querySelector('.ref.on');
     if (on && on.scrollIntoView) on.scrollIntoView({ block: 'nearest' });
-    if (refAt >= 0) preview(sy.refs[refAt]);
+    if (refAt >= 0) preview(sy.refs[refAt]); else previewDef(sy);
+  }
+
+  function previewHead(where, note) {
+    var hd = h('div', 'ph');
+    hd.appendChild(h('span', 'pp mono', where));
+    var cp = btn('cbtn copy');
+    cp.dataset.path = where; cp.title = 'Copy location';
+    cp.appendChild(h('span', 'copy-label', 'Copy'));
+    hd.appendChild(cp);
+    if (note) hd.appendChild(h('span', 'po', note));
+    prev.appendChild(hd);
+  }
+  /** A read-only copy of code rows for the panel (the code above keeps the real ones). */
+  function copyRows(rows) {
+    var box = h('div', 'code ro');
+    rows.forEach(function (row) {
+      var c = row.cloneNode(true);
+      if (row.id) { c.dataset.src = row.id; c.removeAttribute('id'); }
+      c.classList.remove('flash', 'has-c', 'far', 'shown');
+      box.appendChild(c);
+    });
+    prev.appendChild(box);
+    return box;
+  }
+  /** The first lines of the definition; the rest of a long one stays hidden until asked for. */
+  var DEF_LINES = 12;
+  function previewDef(sy) {
+    previewHead(sy.file + ':' + sy.line, 'definition');
+    var el = defRow[sel];
+    if (!el) return;
+    var removed = sy.status === 'removed', rows = [];
+    for (var n = el; n; n = n.nextElementSibling) {
+      if (!n.classList.contains('dl')) continue;
+      var del = n.classList.contains('del');
+      if (removed ? !del || Number(n.querySelector('.lo').textContent) > sy.end
+                  : !del && Number(n.querySelector('.ln').textContent) > sy.end) break;
+      rows.push(n);
+    }
+    var box = copyRows(rows), extra = rows.length - DEF_LINES;
+    if (extra <= 0) return;
+    qa('.dl', box).slice(DEF_LINES).forEach(function (r) { r.classList.add('extra'); });
+    box.classList.add('cut');
+    var more = btn('more', 'Show ' + plural(extra, 'more line', 'more lines'));
+    more.addEventListener('click', function () {
+      var cut = box.classList.toggle('cut');
+      more.textContent = cut ? 'Show ' + plural(extra, 'more line', 'more lines') : 'Show only the first ' + DEF_LINES + ' lines';
+    });
+    prev.appendChild(more);
   }
 
   /** The code around a usage. Outside the diff: the whole calling function. */
   function preview(r) {
     var el = byId(r.el);
-    var hd = h('div', 'ph');
-    hd.appendChild(h('span', 'pp mono', r.file + ':' + r.line));
-    var cp = btn('cbtn copy');
-    cp.dataset.path = r.file + ':' + r.line; cp.title = 'Copy location';
-    cp.appendChild(h('span', 'copy-label', 'Copy'));
-    hd.appendChild(cp);
-    if (r.out) hd.appendChild(h('span', 'po', 'outside the diff'));
-    prev.appendChild(hd);
+    previewHead(r.file + ':' + r.line, r.out ? 'outside the diff' : '');
     if (!el) return;
     if (r.out) {
       lent = el.closest('.caller');
@@ -321,50 +396,66 @@ export const CLIENT_SCRIPT = `
       prev.scrollTop = Math.max(0, el.offsetTop - prev.clientHeight / 2);
       return;
     }
-    // Part of the diff: a read-only copy of the lines around it (the code above scrolls to the real one).
+    // Part of the diff: the lines around it (the code above scrolls to the real one).
     var rows = [el], a = el.previousElementSibling, z = el.nextElementSibling, i;
     for (i = 0; i < 4 && a && !a.classList.contains('gap'); a = a.previousElementSibling) {
-      if (a.classList.contains('dl') && !a.classList.contains('far')) { rows.unshift(a); i++; }
+      if (a.classList.contains('dl') && !hiddenRow(a)) { rows.unshift(a); i++; }
     }
     for (i = 0; i < 4 && z && !z.classList.contains('gap'); z = z.nextElementSibling) {
-      if (z.classList.contains('dl') && !z.classList.contains('far')) { rows.push(z); i++; }
+      if (z.classList.contains('dl') && !hiddenRow(z)) { rows.push(z); i++; }
     }
-    var box = h('div', 'code ro');
-    rows.forEach(function (row) {
-      var c = row.cloneNode(true);
-      if (row.id) { c.dataset.src = row.id; c.removeAttribute('id'); }
-      c.classList.remove('flash', 'has-c');
-      box.appendChild(c);
-    });
-    prev.appendChild(box);
+    copyRows(rows);
   }
 
-  // ── folding: open part of a gap, or the whole file ──
-  function expandGap(g) {
-    var rows = [], n = g.nextElementSibling;
-    while (n && n.classList.contains('far')) { rows.push(n); n = n.nextElementSibling; }
-    if (rows.length <= 20) {
-      rows.forEach(function (r) { r.classList.remove('far'); });
-      g.parentNode.removeChild(g);
-    } else {
-      rows.slice(0, 10).concat(rows.slice(-10)).forEach(function (r) { r.classList.remove('far'); });
-      g.parentNode.insertBefore(g, rows[10]);
-      var left = rows.length - 20;
-      g.textContent = '⋯ ' + plural(left, 'unchanged line', 'unchanged lines') + ' · show more';
-      g.dataset.n = left;
+  // ── folding ──
+  // Unchanged lines far from a change are folded (class "far"). The bar in their place opens
+  // some from its top, some from its bottom, or all of them (class "shown");
+  // "Changes only" folds them all again.
+  var STEP = 20;
+  function hiddenRow(r) { return r.classList.contains('far') && !r.classList.contains('shown'); }
+  function gapButton(act, text, title) {
+    var b = btn(act === 'all' ? '' : 'ga', text);
+    b.dataset.act = act; b.title = title;
+    return b;
+  }
+  /** Put a bar wherever a file has a run of folded lines, and set its Whole file / Changes only button. */
+  function regap(sec) {
+    qa('.gap', sec).forEach(function (g) { g.remove(); });
+    var code = sec.querySelector('.code'), n = code.firstElementChild;
+    while (n) {
+      if (!hiddenRow(n)) { n = n.nextElementSibling; continue; }
+      var first = n, count = 0;
+      while (n && hiddenRow(n)) { count++; n = n.nextElementSibling; }
+      var g = h('div', 'gap');
+      if (count > STEP) g.appendChild(gapButton('top', '↓ Show ' + STEP + ' from the top', 'Show the first ' + STEP + ' of these lines'));
+      g.appendChild(gapButton('all', '⋯ ' + plural(count, 'unchanged line', 'unchanged lines') + (count > STEP ? ' · show all' : ''), 'Show all of these lines'));
+      if (count > STEP) g.appendChild(gapButton('bottom', '↑ Show ' + STEP + ' from the bottom', 'Show the last ' + STEP + ' of these lines'));
+      code.insertBefore(g, first);
     }
+    var b = sec.querySelector('.expand');
+    if (!b) return;
+    var open = sec.classList.contains('whole') || !!sec.querySelector('.dl.shown');
+    b.setAttribute('aria-pressed', String(open));
+    b.textContent = open ? 'Changes only' : 'Whole file';
+    b.title = open ? 'Fold all unchanged lines again' : 'Show the whole file';
   }
+  function openGap(b) {
+    var g = b.closest('.gap'), rows = [], n = g.nextElementSibling;
+    while (n && hiddenRow(n)) { rows.push(n); n = n.nextElementSibling; }
+    var act = b.dataset.act;
+    (act === 'top' ? rows.slice(0, STEP) : act === 'bottom' ? rows.slice(-STEP) : rows).forEach(function (r) { r.classList.add('shown'); });
+    regap(g.closest('.fsec'));
+  }
+  /** Whole file, or back to the changes only (which also folds lines opened by hand). */
   function wholeFile(b) {
-    var sec = b.closest('.fsec'), on = !sec.classList.contains('whole');
-    sec.classList.toggle('whole', on);
-    b.setAttribute('aria-pressed', String(on));
-    b.textContent = on ? 'Changes only' : 'Whole file';
-    b.title = on ? 'Fold unchanged lines' : 'Show the whole file';
+    var sec = b.closest('.fsec');
+    if (sec.classList.contains('whole') || sec.querySelector('.dl.shown')) {
+      sec.classList.remove('whole');
+      qa('.dl.shown', sec).forEach(function (r) { r.classList.remove('shown'); });
+    } else sec.classList.add('whole');
+    regap(sec);
   }
-  qa('.gap').forEach(function (g) {
-    var n = Number(g.dataset.n);
-    if (n > 20) g.textContent = g.textContent + ' · show more';
-  });
+  files.forEach(regap);
 
   // ── viewed files ──
   // On the service the marks are saved on the server, per user; in a standalone
