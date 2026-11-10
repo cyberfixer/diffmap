@@ -4,7 +4,8 @@ import type { ChangedSymbol, ChangeStatus, DiffLine, LineRange, SymbolInfo } fro
 /** Everything we learned about one side (base or head) of a file. */
 interface SideAnalysis {
   all: Map<string, SymbolInfo>; // every named symbol in the whole file on this side
-  touched: Set<string>; // names of symbols containing at least one changed line
+  named: Map<string, SymbolInfo[]>; // the same, with every symbol of a name (overloads that differ by type share one)
+  touched: Map<string, SymbolInfo>; // by name, the symbols containing at least one changed line
   topLevelCount: number; // changed lines outside every named symbol
 }
 
@@ -14,19 +15,43 @@ interface SideAnalysis {
  *
  * A symbol's status comes from whether it exists in the WHOLE file on each side,
  * not from which side its changed lines were on.
+ *
+ * `sameAs`: for languages whose names carry the signature (Swift's `load(_:cache:)`),
+ * the part of a name that stays when the signature changes ("load"). A symbol
+ * that is gone under its old name and new under another with the same part is
+ * then one modified symbol, not a removed and an added one.
  */
 export function mapChangesToSymbols(
   input: SymbolParserInput,
   listSymbols: (source: string) => SymbolInfo[],
+  sameAs?: (name: string) => string,
 ): ChangedSymbol[] {
   const { filePath, removedLines, addedLines, diffLines, baseSource, headSource } = input;
   const base = analyzeSide(baseSource, removedLines, listSymbols);
   const head = analyzeSide(headSource, addedLines, listSymbols);
   const results: ChangedSymbol[] = [];
 
-  for (const name of new Set([...base.touched, ...head.touched])) {
-    const inBase = base.all.get(name);
-    const inHead = head.all.get(name);
+  // The one symbol on the other side that `name` (found on `here`) was or became, if it is clear which.
+  const twin = (name: string, here: SideAnalysis, there: SideAnalysis): SymbolInfo | undefined => {
+    if (!sameAs || there.all.has(name)) return undefined;
+    const key = sameAs(name);
+    const only = (side: SideAnalysis, other: SideAnalysis) => [...side.all.values()].filter((s) => sameAs(s.name) === key && !other.all.has(s.name));
+    const [mine, theirs] = [only(here, there), only(there, here)];
+    return mine.length === 1 && theirs.length === 1 ? theirs[0] : undefined;
+  };
+  // Report a symbol whose signature changed under its new name only.
+  const current = (name: string) => (base.all.has(name) ? twin(name, base, head)?.name ?? name : name);
+
+  // Of several symbols with one name, the one the change is in; on the other side, the one in the same place among them.
+  const samePlace = (sym: SymbolInfo, here: SideAnalysis, there: SideAnalysis): SymbolInfo | undefined =>
+    there.named.get(sym.name)?.[here.named.get(sym.name)?.indexOf(sym) ?? 0];
+
+  for (const name of new Set([...base.touched.keys(), ...head.touched.keys()].map(current))) {
+    const touchedBase = base.touched.get(name);
+    const touchedHead = head.touched.get(name);
+    const inHead = touchedHead ?? (touchedBase && samePlace(touchedBase, base, head)) ?? head.all.get(name);
+    const inBase =
+      touchedBase ?? (touchedHead && samePlace(touchedHead, head, base)) ?? base.all.get(name) ?? (inHead ? twin(name, head, base) : undefined);
     const info = (inHead ?? inBase)!;
     const status: ChangeStatus = inBase && inHead ? "modified" : inHead ? "added" : "removed";
     results.push({
@@ -65,13 +90,17 @@ function analyzeSide(
   lines: Set<number>,
   listSymbols: (source: string) => SymbolInfo[],
 ): SideAnalysis {
-  const result: SideAnalysis = { all: new Map(), touched: new Set(), topLevelCount: 0 };
+  const result: SideAnalysis = { all: new Map(), named: new Map(), touched: new Map(), topLevelCount: 0 };
   if (!source) return result;
   const symbols = listSymbols(source);
-  for (const sym of symbols) if (!result.all.has(sym.name)) result.all.set(sym.name, sym);
+  for (const sym of symbols) {
+    if (!result.all.has(sym.name)) result.all.set(sym.name, sym);
+    result.named.set(sym.name, [...(result.named.get(sym.name) ?? []), sym]);
+  }
   for (const line of lines) {
     const sym = innermostAtLine(symbols, line);
-    if (sym) result.touched.add(sym.name);
+    // Two symbols can share a name (overloads that differ by type): the one holding the change counts.
+    if (sym && !result.touched.has(sym.name)) result.touched.set(sym.name, sym);
     else result.topLevelCount++;
   }
   return result;

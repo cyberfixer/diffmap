@@ -22,7 +22,7 @@ There are two ways to use it:
 | JavaScript | functions, classes, methods, arrow functions | matched by name | ✅ scip-typescript |
 | Java | classes, records, interfaces, enums, methods, constructors, method references | matched by name | ✅ scip-java |
 | Kotlin | classes, interfaces, enums, objects, functions, constructors, properties with a getter | matched by name | ✅ scip-java |
-| Swift | classes, structs, enums, protocols and their methods, extensions, functions, `init`, computed properties, subscripts | matched by name | — |
+| Swift | classes, structs, enums, actors, protocols and what they require, extensions, functions, `init`, subscripts, properties with code (computed, set up by a closure, with `didSet`) | matched by name and [argument labels](#swift-and-ios) | — |
 | C# | classes, records, structs, interfaces, enums, methods, constructors, properties with code | matched by name | — |
 | Scala | classes, objects, traits, functions | matched by name | — |
 | Go | functions, methods, structs, interfaces | matched by name | — |
@@ -302,6 +302,35 @@ compiler:
   `cat a.scip b.scip > index.scip`.
 - An index also says which classes implement which interfaces: the dashed arrows.
 
+### Swift and iOS
+
+Swift has no indexer to give exact calls, so name matching does more for it:
+
+- **Methods are named with their argument labels**, the way Swift tells them apart:
+  `tableView(_:cellForRowAt:)`, `init(frame:)`, `init(coder:)`. A change in one of a
+  view controller's five `tableView(...)` methods marks that one. A call is linked
+  only to methods that can take its labels (defaults and trailing closures count).
+  A method whose signature changed shows as modified, under its new name.
+- **Properties with code are symbols**: computed properties, `lazy var table: UITableView = { ... }()`,
+  properties with `didSet`. Reading one is a use: a SwiftUI `body` that shows `header`
+  is drawn as using it, and so is `viewModel.title` when `viewModel`'s type is written down.
+- **Uses that are not calls** count too: `#selector(didTapSave)`, and a function passed
+  by name (`Button("Save", action: save)`).
+- `super.viewDidLoad()` is the parent's method; a plain `setup()` is the type's own
+  first, also from an extension in another file; `Svc(a: 1)` links to the type and to
+  `Svc.init(a:)`; `let tab: Tab = .init(1)` to `Tab.init(_:)`.
+- **Files of one module see each other** without imports, in any folder. A module is a
+  folder named after something the code imports (`import Networking`, `@testable import App`)
+  or a folder right under `Sources/` or `Tests/`; everything else is the app. diffmap does
+  not read `.xcodeproj` or `Package.swift`.
+- A class built on a UIKit class reaches what the repo adds to UIKit's own parents
+  (`class Cell: UITableViewCell` calling `pin()` from `extension UIView`).
+
+Left out on purpose, because a name alone is not enough: a method called on something
+whose type is not written down, when several types have one (`items.map { }`);
+`.success(x)` and other members of a type only the compiler knows, unless the type is
+written nearby. Objective-C files (`.m`) show as plain diff cards.
+
 ### Angular
 
 Angular templates are part of the map without any setup:
@@ -358,6 +387,8 @@ The code is split into layers; inner layers never import outer ones.
 
 To add a language tree-sitter has a grammar for, add an entry to `languages.ts`
 and to the grammar list in the `Dockerfile`, plus a test in `tests/tree-sitter.test.ts`.
+Grammars come from `tree-sitter-wasms`; Swift's is newer than that package has and
+lives in [`grammars/`](grammars/README.md).
 
 ---
 

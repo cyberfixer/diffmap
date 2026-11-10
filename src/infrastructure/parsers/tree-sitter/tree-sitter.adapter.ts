@@ -3,6 +3,9 @@ import type { ChangedSymbol } from "../../../domain/symbol.js";
 import { mapChangesToSymbols } from "../../../application/symbol-mapping.js";
 import type { TreeSitterEngine } from "./engine.js";
 
+/** A name without Swift's argument labels: "Svc.load(_:cache:)" -> "Svc.load". Other names stay as they are. */
+const withoutLabels = (name: string): string => name.replace(/\((?:[^\s():]+:)+\)/g, "");
+
 /** Changed symbols for every language tree-sitter knows (see languages.ts). */
 export class TreeSitterSymbolParser implements SymbolParserPort {
   readonly supportedExtensions: readonly string[];
@@ -12,6 +15,6 @@ export class TreeSitterSymbolParser implements SymbolParserPort {
   }
 
   parse(input: SymbolParserInput): ChangedSymbol[] {
-    return mapChangesToSymbols(input, (source) => this.engine.symbols(input.filePath, source));
+    return mapChangesToSymbols(input, (source) => this.engine.symbols(input.filePath, source), withoutLabels);
   }
 }
