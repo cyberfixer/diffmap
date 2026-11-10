@@ -130,6 +130,7 @@ describe("view-only mode (no GitLab application)", () => {
     expect(html).toContain("!7 · Return two");
     expect(html).toContain(">View only<");
     expect(html).not.toContain('id="approve"');
+    expect(html).not.toContain('<span class="chint">'); // no "click a line number to comment" hint
     expect(html).toContain('"readOnly":true');
     expect(html).toContain("Looks good"); // existing comments are still shown
     expect(html).toContain('<body class="mr">'); // no "mr-write": line numbers are not clickable

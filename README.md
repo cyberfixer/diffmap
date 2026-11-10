@@ -226,7 +226,9 @@ download progress, and opens the map when it's done.
 
 In full mode you can also:
 
-- **Comment:** click a line number. The comment appears on the host as a normal
+- **Comment:** point at a line; a blue **+** appears next to its line number.
+  Click the + or the number, type, and press **Comment** (Ctrl+Enter). The
+  status bar and the **Comments** tab say this too. The comment appears on the host as a normal
   line comment. A line in a file that isn't part of the review (a caller
   somewhere else) is posted as a general comment that quotes the line, because
   the host can't attach a comment there.

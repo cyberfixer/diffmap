@@ -246,6 +246,15 @@ export const STYLE = `
   body.mr-write .dl .lo, body.mr-write .dl .ln { cursor:pointer; }
   body.mr-write .dl .lo:hover, body.mr-write .dl .ln:hover { background:var(--accent-bg); color:var(--accent); }
   body.mr-write .ro .dl .lo, body.mr-write .ro .dl .ln { cursor:default; background:none; color:var(--faint); }
+  /* A blue "+" appears next to the line number of the line under the pointer: click it (or the number) to comment. */
+  body.mr-write .dl .sg { position:relative; cursor:pointer; }
+  body.mr-write .dl:hover .sg::after { content:"+"; position:absolute; left:-1px; top:1px; width:18px; height:18px; border-radius:4px;
+                                       background:var(--accent); color:var(--panel); font:600 14px/18px var(--sans); text-align:center; }
+  body.mr-write .ro .dl .sg { cursor:default; }
+  body.mr-write .ro .dl:hover .sg::after { content:none; }
+  .plus { display:inline-block; width:16px; height:16px; margin-right:5px; border-radius:4px; background:var(--accent); color:var(--panel);
+          font:600 13px/16px var(--sans); text-align:center; vertical-align:-2px; }
+  .chint { margin:0; color:var(--muted); }
   .dl.has-c .lo { box-shadow:inset 3px 0 0 var(--accent); }
   .thread, .composer { margin:4px 16px 8px 96px; max-width:720px; border:1px solid var(--line-strong); border-radius:6px; background:var(--panel);
                        font:13px/1.45 var(--sans); color:var(--fg); cursor:auto; }

@@ -175,6 +175,7 @@ describe("diffmap service", () => {
     expect(html).toContain("!42 · Trim emails on login");
     expect(html).toContain("Sara K · feature/creds → main · 1 commit");
     expect(html).toContain('id="approve"');
+    expect(html).toContain("Click a line number to comment on that line");
     expect(html).toContain(">Approve</button>");
     expect(html).toContain("Why trim here?");
     expect(html).toContain("/api/team/api/-/merge_requests/42");

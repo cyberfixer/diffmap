@@ -197,7 +197,7 @@ export const CLIENT_SCRIPT = `
     if ((x = t.closest('.fold'))) { x = x.closest('.fsec'); setShut(x, !x.classList.contains('shut')); return; }
     if (t.closest('button, a, input, label, textarea, .thread, .composer')) return;
     if (window.getSelection().toString()) return;
-    if (D.mr && t.closest('.lo, .ln')) return; // in a merge request the line number starts a comment
+    if (D.mr && t.closest('.lo, .ln, .sg')) return; // in a merge request the line number (and the "+" beside it) starts a comment
     // Like an editor: on a usage, go to the definition; on a definition, show its usages.
     var name = t.closest('.sym');
     if (name) {

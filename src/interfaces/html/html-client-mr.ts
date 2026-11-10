@@ -151,6 +151,14 @@ export const MR_CLIENT_SCRIPT = `
 
   // ── the Comments tab: every thread on a line (click to go there), then general comments ──
   var pane = byId('cpane');
+  // Say how to comment, where people look for it.
+  var how = h('p', 'chint');
+  if (M.readOnly) how.textContent = 'This diffmap is view-only. To comment, open the review in ' + M.hostName + '.';
+  else {
+    how.appendChild(h('span', 'plus', '+'));
+    how.appendChild(document.createTextNode('To comment on a line, point at it in the code and click the blue + or its line number. Click Reply under a thread to answer it.'));
+  }
+  pane.appendChild(how);
   var onLines = h('div');
   pane.appendChild(onLines);
   /** One line per thread that sits on a code line, in file order. */
@@ -208,7 +216,7 @@ export const MR_CLIENT_SCRIPT = `
 
   // ── click a line number to comment on that line ──
   if (!M.readOnly) document.addEventListener('click', function (e) {
-    var g = e.target.closest('.lo, .ln');
+    var g = e.target.closest('.lo, .ln, .sg');
     if (!g) return;
     var row = g.closest('.dl');
     if (!row || !row.closest('.fsec, .caller')) return; // not the read-only copies in the usages panel

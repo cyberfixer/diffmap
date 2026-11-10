@@ -487,6 +487,7 @@ export function renderHtml(
   <span>${views.length} file${views.length === 1 ? "" : "s"} · ${changed.length} symbol${changed.length === 1 ? "" : "s"}</span>
   ${outSummary}
   ${exactNote(result, mrPage?.indexState)}
+  ${mrPage && !mrPage.readOnly ? `<span class="chint"><span class="plus" aria-hidden="true">+</span>Click a line number to comment on that line</span>` : ""}
   <span class="keys" title="Keyboard shortcuts. The arrow keys move through usages while a symbol is selected; otherwise they scroll."><span><kbd>↑</kbd><kbd>↓</kbd> usages</span><span><kbd>→</kbd> definition</span><span><kbd>←</kbd> back</span><span><kbd>N</kbd><kbd>P</kbd> next / previous file</span><span><kbd>/</kbd> search</span><span><kbd>V</kbd> viewed</span><span><kbd>C</kbd> collapse</span><span><kbd>Esc</kbd> close</span></span>
   <span class="vprog">Viewed <span><span id="vcount">0</span> of ${views.length} file${views.length === 1 ? "" : "s"}</span><span class="bar"><span id="vbar"></span></span></span>
 </footer>
