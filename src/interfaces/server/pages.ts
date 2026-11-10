@@ -6,7 +6,7 @@ import type { HostProfile } from "./host-profile.js";
 const esc = (s: string): string =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-const DARK = "--bg:#141413; --panel:#1C1C1A; --line:#2F2E2B; --line-strong:#45443F; --fg:#ECEBE6; --muted:#A3A199; --accent:#7AA2F7; --err:#F28B82;";
+const DARK = "--bg:#141413; --panel:#1B1B19; --side:#171715; --line:#2C2B28; --line-strong:#45443F; --fg:#ECEBE6; --muted:#A3A199; --hover:#282724; --accent:#7AA2F7; --err:#F28B82;";
 
 const LOGO = `<svg aria-hidden="true" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2.5"></circle><circle cx="19" cy="6" r="2.5"></circle><circle cx="12" cy="18" r="2.5"></circle><path d="M7.5 6h9M6.5 8.2l4.2 7.6M17.5 8.2l-4.2 7.6"></path></svg>`;
 
@@ -21,36 +21,48 @@ function shell(title: string, body: string): string {
 <script>${THEME_BOOT}</script>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
 <style>
-  :root { --bg:#F6F6F3; --panel:#FFFFFF; --line:#E2E1DC; --line-strong:#C9C8C1; --fg:#1C1C1A; --muted:#5F5E58; --accent:#2457C5; --err:#8E1B12; }
+  :root { --bg:#F6F6F3; --panel:#FFFFFF; --side:#FAFAF7; --line:#E4E3DD; --line-strong:#C9C8C1; --fg:#1C1C1A; --muted:#66655F; --hover:#EDECE7; --accent:#2457C5; --err:#8E1B12; }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) { ${DARK} }
   }
   :root[data-theme="dark"] { ${DARK} }
-  .brand .theme { margin-left:auto; display:inline-flex; align-items:center; gap:6px; min-height:34px; padding:0 10px;
-                  border:1px solid var(--line-strong); border-radius:8px; background:var(--panel); color:var(--muted);
-                  font:13px 'IBM Plex Sans', system-ui, sans-serif; font-weight:400; cursor:pointer; }
-  .brand .theme svg { width:15px; height:15px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+  :root { color-scheme: light dark; }
+  :root[data-theme="light"] { color-scheme: light; }
+  :root[data-theme="dark"] { color-scheme: dark; }
   * { box-sizing:border-box; }
   body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px 16px;
-         background:var(--bg); color:var(--fg); font:15px/1.5 'IBM Plex Sans', system-ui, sans-serif; }
-  main { width:100%; max-width:520px; background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:32px; }
-  .brand { display:flex; align-items:center; gap:10px; font-weight:600; font-size:18px; margin-bottom:20px; }
-  h1 { font-size:20px; margin:0 0 8px; }
+         background:var(--bg); color:var(--fg); font:14px/1.5 'IBM Plex Sans', system-ui, sans-serif; }
+  /* The same window look as the review page: a title bar on top of a plain panel. */
+  main { width:100%; max-width:520px; background:var(--panel); border:1px solid var(--line-strong); border-radius:8px; overflow:hidden; }
+  .brand { display:flex; align-items:center; gap:8px; min-height:44px; padding:6px 10px 6px 16px; font-weight:600; font-size:14px;
+           background:var(--side); border-bottom:1px solid var(--line); }
+  .brand svg { width:20px; height:20px; }
+  .brand .theme { margin-left:auto; display:inline-flex; align-items:center; gap:6px; min-height:30px; padding:0 9px;
+                  border:1px solid var(--line-strong); border-radius:6px; background:var(--panel); color:var(--muted);
+                  font:13px 'IBM Plex Sans', system-ui, sans-serif; font-weight:400; cursor:pointer; }
+  .brand .theme:hover { background:var(--hover); }
+  .brand .theme svg { width:15px; height:15px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+  .body { padding:24px 24px 28px; }
+  h1 { font-size:18px; line-height:1.3; margin:0 0 8px; text-wrap:balance; }
   p { margin:0 0 16px; color:var(--muted); }
-  label { display:block; font-size:13px; font-weight:500; margin-bottom:6px; }
-  input { width:100%; min-height:44px; padding:0 12px; border:1px solid var(--line-strong); border-radius:8px;
-          background:var(--bg); color:var(--fg); font:14px 'IBM Plex Mono', ui-monospace, monospace; }
-  .btn { display:inline-flex; align-items:center; justify-content:center; min-height:44px; padding:0 18px; margin-top:14px;
-         border:1px solid var(--fg); border-radius:8px; background:var(--fg); color:var(--panel); font:inherit; font-weight:500;
+  label { display:block; font-size:12px; font-weight:600; margin-bottom:6px; }
+  input { width:100%; min-height:38px; padding:0 10px; border:1px solid var(--line-strong); border-radius:6px;
+          background:var(--bg); color:var(--fg); font:13px 'IBM Plex Mono', ui-monospace, monospace; }
+  .btn { display:inline-flex; align-items:center; justify-content:center; min-height:38px; padding:0 16px; margin-top:14px;
+         border:1px solid var(--fg); border-radius:6px; background:var(--fg); color:var(--panel); font:inherit; font-weight:500;
          text-decoration:none; cursor:pointer; }
-  .foot { display:flex; justify-content:space-between; align-items:center; margin-top:24px; font-size:13px; color:var(--muted); }
+  .btn:hover { opacity:.9; }
+  .btn:focus-visible, input:focus-visible, .theme:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+  .foot { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:6px 16px; margin:24px -24px -28px; padding:8px 24px;
+          background:var(--side); border-top:1px solid var(--line); font-size:12px; color:var(--muted); }
+  .foot form { margin:0; }
   .foot button { border:0; background:none; color:var(--accent); font:inherit; cursor:pointer; padding:0; }
-  code { font-family:'IBM Plex Mono', ui-monospace, monospace; font-size:13px; }
+  code { font-family:'IBM Plex Mono', ui-monospace, monospace; font-size:12.5px; overflow-wrap:anywhere; }
   .err { color:var(--err); }
   a { color:var(--accent); }
 </style>
 </head>
-<body><main><div class="brand">${LOGO}<span>diffmap</span>${THEME_BUTTON}</div>${body}</main></body>
+<body><main><div class="brand">${LOGO}<span>diffmap</span>${THEME_BUTTON}</div><div class="body">${body}</div></main></body>
 </html>`;
 }
 
@@ -115,10 +127,11 @@ export function loadingPage(title: string, statusUrl: string, status: PreparingS
   .steps li::before { content:""; width:12px; height:12px; border-radius:999px; border:2px solid var(--line-strong); flex:none; }
   .steps li.on { color:var(--fg); font-weight:500; }
   .steps li.on::before { border-color:var(--accent); background:var(--accent); animation:pulse 1.2s infinite; }
+  @media (prefers-reduced-motion: reduce) { .steps li.on::before, .fill.unknown { animation:none; } }
   .steps li.done::before { border-color:var(--accent); background:var(--accent); }
   @keyframes pulse { 50% { opacity:.4; } }
-  .track { height:8px; border-radius:999px; background:var(--line); overflow:hidden; position:relative; }
-  .fill { height:8px; width:0; background:var(--accent); transition:width .4s; }
+  .track { height:4px; border-radius:2px; background:var(--line); overflow:hidden; position:relative; }
+  .fill { height:4px; width:0; background:var(--accent); transition:width .4s; }
   .fill.unknown { width:30%; position:absolute; animation:slide 1.4s ease-in-out infinite; }
   @keyframes slide { from { left:-30%; } to { left:100%; } }
   .detail { display:flex; justify-content:space-between; gap:12px; margin-top:8px; font-size:13px; color:var(--muted); }
