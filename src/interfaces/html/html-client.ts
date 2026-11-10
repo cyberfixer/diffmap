@@ -1,26 +1,26 @@
 /**
  * Browser script for the HTML report. Reads the DIFFMAP data object written by
- * renderHtml and wires up selection (highlights, go to definition / usages), folding, "viewed" progress,
- * pan and zoom. Kept free of template-literal syntax so it can live in a TS string.
+ * renderHtml and wires up the editor-like screen: selection (go to definition /
+ * usages), the usages panel, folding, collapsing files and "viewed" progress.
+ * Kept free of template-literal syntax so it can live in a TS string.
  */
 export const CLIENT_SCRIPT = `
 (function () {
   var D = DIFFMAP, syms = D.syms;
-  var vp = byId('vp'), cv = byId('cv'), sv = byId('sv'), eg = byId('edges');
-  var leftCards = qa('.card.in'), outCards = qa('.card.out');
-  var GAP = 28, s = 1, tx = 0, ty = 0, W = 0, H = 0;
-  var sel = null, showOut = true, rightShown = false;
+  var ed = byId('ed'), dock = byId('dock'), prev = byId('prev'), ulist = byId('ulist'), outsrc = byId('outsrc');
+  var files = qa('.fsec');
+  var sel = null, refAt = -1, tab = 'u', hist = [], lent = null;
   var viewed = loadViewed();
 
   function byId(i) { return document.getElementById(i); }
   function qa(q, root) { return [].slice.call((root || document).querySelectorAll(q)); }
-  function has(list, k) { return (' ' + (list || '') + ' ').indexOf(' ' + k + ' ') >= 0; }
   function h(tag, cls, text) {
     var e = document.createElement(tag);
     if (cls) e.className = cls;
     if (text !== undefined && text !== null) e.textContent = text;
     return e;
   }
+  function btn(cls, text) { var b = h('button', cls, text); b.type = 'button'; return b; }
   function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
 
   // The rows that call a changed symbol, and which symbols they call.
@@ -41,203 +41,105 @@ export const CLIENT_SCRIPT = `
     r.dataset.defs.split(' ').forEach(function (k) { if (!defRow[k]) defRow[k] = r; });
   });
 
-  // ── layout: stack each column from measured heights ──
-  function outOn() { return showOut && sel !== null; }
-  function stack() {
-    var y = D.top;
-    leftCards.forEach(function (c) { c.style.top = y + 'px'; y += c.offsetHeight + GAP; });
-    // Usages outside the diff sit next to the selected symbol, not at the top of the map.
-    var y2 = D.top, on = outOn();
-    if (on && defRow[sel] && defRow[sel].offsetParent) {
-      var dc = defRow[sel].closest('.card');
-      y2 = Math.max(D.top, dc.offsetTop + defRow[sel].offsetTop - 40);
+  // ── underline the symbol's name on its definition and on each usage, like a link in an editor ──
+  function shortName(n) { var p = n.split(/[.#:]+/); return p[p.length - 1]; }
+  function markName(row, k, def) {
+    var name = shortName(syms[k].name), tx = row.querySelector('.tx');
+    if (!name || !tx) return;
+    var w = document.createTreeWalker(tx, NodeFilter.SHOW_TEXT), n;
+    while ((n = w.nextNode())) {
+      if (n.parentNode.classList.contains('sym')) continue;
+      var t = n.nodeValue, at = -1, from = 0;
+      while ((at = t.indexOf(name, from)) >= 0) {
+        var b = at ? t.charAt(at - 1) : '', a = t.charAt(at + name.length);
+        if (!/[A-Za-z0-9_$]/.test(b) && !/[A-Za-z0-9_$]/.test(a)) break;
+        from = at + 1;
+      }
+      if (at < 0) continue;
+      var mid = n.splitText(at); mid.splitText(name.length);
+      var s = h('span', 'sym');
+      s.dataset.k = k;
+      if (def) s.dataset.def = '1';
+      mid.parentNode.replaceChild(s, mid); s.appendChild(mid);
+      return;
     }
-    var outTop = y2;
-    outCards.forEach(function (c) {
-      var vis = on && has(c.dataset.for, sel);
-      c.classList.toggle('vis', vis);
-      if (!vis) return;
-      qa('.caller', c).forEach(function (b) { b.classList.toggle('vis', has(b.dataset.for, sel)); });
-      c.style.top = y2 + 'px';
-      y2 += c.offsetHeight + GAP;
-    });
-    rightShown = y2 > outTop;
-    document.body.classList.toggle('show-out', rightShown);
-    W = (rightShown ? D.rightX + D.rightW : D.leftX + D.leftW + 120) + D.leftX;
-    H = Math.max(y, y2) - GAP + D.leftX;
-    cv.style.width = W + 'px'; cv.style.height = H + 'px';
-    sv.setAttribute('width', W); sv.setAttribute('height', H);
   }
+  Object.keys(defRow).forEach(function (k) { markName(defRow[k], Number(k), true); });
+  Object.keys(callsOn).forEach(function (id) {
+    callsOn[id].forEach(function (k) { markName(byId(id), k, false); });
+  });
 
-  // Middle of a code row, in canvas coordinates (null if it is hidden).
-  function rowY(el) {
-    if (!el || !el.offsetParent) return null;
-    var card = el.closest('.card');
-    return card.offsetTop + el.offsetTop + el.offsetHeight / 2;
+  // ── moving around the code ──
+  function setShut(sec, on) {
+    sec.classList.toggle('shut', on);
+    sec.querySelector('.fold').setAttribute('aria-expanded', String(!on));
   }
-
-  // No arrows: the selected symbol's definition and every place it is used are highlighted
-  // instead, and clicking moves between them (see "selection").
-  function draw() { eg.textContent = ''; }
-
-  function relayout() { stack(); draw(); }
-
-  // ── pan and zoom ──
-  function apply() {
-    cv.style.transform = 'translate(' + tx + 'px,' + ty + 'px) scale(' + s + ')';
-    byId('zpct').textContent = Math.round(s * 100) + '%';
-  }
-  function fit() {
-    s = Math.max(0.25, Math.min(1, (vp.clientWidth - 16) / W));
-    tx = 0; ty = 0; apply();
-  }
-  function zoomAt(f, cx, cy) {
-    var ns = Math.max(0.15, Math.min(2.5, s * f));
-    tx = cx - (cx - tx) * (ns / s); ty = cy - (cy - ty) * (ns / s); s = ns; apply();
-  }
-  function centre(f) { zoomAt(f, vp.clientWidth / 2, vp.clientHeight / 2); }
-  /** Pan so a row (or card) is in view, a third of the way down, and flash it. */
+  /** Scroll a row (or a whole file) into view, a third of the way down, and flash it. */
   function reveal(el) {
-    if (!el || !el.offsetParent) return;
-    var card = el.closest('.card') || el;
-    var y = card === el ? card.offsetTop : card.offsetTop + el.offsetTop;
-    var left = card.offsetLeft * s + tx, right = (card.offsetLeft + card.offsetWidth) * s + tx;
-    if (left < 0 || right > vp.clientWidth) tx = Math.min(0, vp.clientWidth - 16 - (card.offsetLeft + card.offsetWidth) * s);
-    if (card.offsetLeft * s + tx < 0) tx = 8 - card.offsetLeft * s;
-    ty = vp.clientHeight / 3 - y * s;
-    apply();
+    if (!el || !ed.contains(el)) return;
+    var sec = el.closest('.fsec');
+    if (sec && sec !== el) { sec.classList.remove('big'); setShut(sec, false); }
+    hist.push(ed.scrollTop);
+    if (hist.length > 50) hist.shift();
+    byId('back').disabled = false;
+    var top = el.getBoundingClientRect().top - ed.getBoundingClientRect().top;
+    ed.scrollTop += top - (sec === el ? 0 : ed.clientHeight / 3);
     if (el.classList.contains('dl')) {
       el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash');
     }
   }
-
-  vp.addEventListener('wheel', function (e) {
-    e.preventDefault();
-    var r = vp.getBoundingClientRect();
-    if (e.ctrlKey || e.metaKey) {              // ctrl+scroll, or a trackpad pinch: zoom at the pointer
-      zoomAt(e.deltaY < 0 ? 1.1 : 1 / 1.1, e.clientX - r.left, e.clientY - r.top);
-    } else {                                   // plain scroll pans, like scrolling code in an editor
-      tx -= e.shiftKey ? e.deltaY : e.deltaX;
-      ty -= e.shiftKey ? 0 : e.deltaY;
-      apply();
-    }
-  }, { passive: false });
-
-  var drag = null, moved = false;
-  vp.addEventListener('pointerdown', function (e) {
-    moved = false;
-    if (e.button !== 0 || e.target.closest('.tx, .fpath, button, a, textarea, .thread, .composer')) return; // keep code selectable, buttons clickable
-    drag = { x: e.clientX - tx, y: e.clientY - ty, sx: e.clientX, sy: e.clientY };
-    vp.classList.add('drag');
-  });
-  function endDrag() { drag = null; vp.classList.remove('drag'); }
-  window.addEventListener('pointermove', function (e) {
-    if (!drag) return;
-    // Released outside the window (no pointerup reached the page): stop here.
-    if (e.pointerType === 'mouse' && !(e.buttons & 1)) { endDrag(); return; }
-    if (Math.abs(e.clientX - drag.sx) + Math.abs(e.clientY - drag.sy) > 4) moved = true;
-    tx = e.clientX - drag.x; ty = e.clientY - drag.y; apply();
-  });
-  window.addEventListener('pointerup', endDrag);
-  window.addEventListener('pointercancel', endDrag);
-  window.addEventListener('blur', endDrag);
-  vp.addEventListener('dragstart', function (e) { if (drag) e.preventDefault(); }); // no native drag of selected text
-
-  // ── middle-button autoscroll, like a browser page ──
-  // Hold the middle button and move away from where you pressed: the map scrolls
-  // that way, faster the further you go. A middle click without moving keeps it
-  // on until the next click, a scroll, or Escape.
-  var auto = null, DEAD = 10;
-  vp.addEventListener('mousedown', function (e) { if (e.button === 1) e.preventDefault(); }); // no native autoscroll or paste
-  vp.addEventListener('pointerdown', function (e) {
-    if (auto) { stopAuto(); e.preventDefault(); e.stopImmediatePropagation(); return; }
-    if (e.button !== 1 || e.target.closest('textarea')) return;
-    e.preventDefault();
-    var r = vp.getBoundingClientRect();
-    var mark = h('div', 'auto-mark');
-    mark.style.left = (e.clientX - r.left) + 'px'; mark.style.top = (e.clientY - r.top) + 'px';
-    vp.appendChild(mark);
-    vp.classList.add('autoscroll');
-    auto = { ox: e.clientX, oy: e.clientY, cx: e.clientX, cy: e.clientY, moved: false, mark: mark, t: performance.now() };
-    requestAnimationFrame(autoStep);
-  }, true);
-  window.addEventListener('pointermove', function (e) {
-    if (!auto) return;
-    auto.cx = e.clientX; auto.cy = e.clientY;
-    if (Math.abs(auto.cx - auto.ox) + Math.abs(auto.cy - auto.oy) > DEAD) auto.moved = true;
-  });
-  window.addEventListener('pointerup', function (e) { if (auto && e.button === 1 && auto.moved) stopAuto(); });
-  vp.addEventListener('wheel', function () { if (auto) stopAuto(); }, true);
-  window.addEventListener('keydown', function (e) { if (auto && e.key === 'Escape') stopAuto(); });
-  window.addEventListener('blur', function () { if (auto) stopAuto(); });
-  function speed(d) { var a = Math.abs(d) - DEAD; return a <= 0 ? 0 : (d < 0 ? -1 : 1) * a * 8; } // px per second
-  function autoStep(now) {
-    if (!auto) return;
-    var dt = Math.min(0.05, (now - auto.t) / 1000); auto.t = now;
-    var vx = speed(auto.cx - auto.ox), vy = speed(auto.cy - auto.oy);
-    if (vx || vy) { tx -= vx * dt; ty -= vy * dt; apply(); }
-    requestAnimationFrame(autoStep);
+  /** Back to where the code was before the last jump. */
+  function back() {
+    if (!hist.length) return;
+    ed.scrollTop = hist.pop();
+    byId('back').disabled = !hist.length;
   }
-  function stopAuto() {
-    auto.mark.remove(); auto = null;
-    vp.classList.remove('autoscroll');
-    moved = true; // the click that ends autoscroll is not a selection
-  }
+  byId('back').onclick = back;
 
-  // ── resizable side panels (widths kept in this browser) ──
+  // ── resizable explorer and usages panel (sizes kept in this browser) ──
   (function () {
-    var panes = byId('panes'), KEY = 'diffmap:panes';
-    if (!panes) return;
-    var w = {};
+    var work = byId('work'), main = byId('main'), KEY = 'diffmap:panes', w = {};
     try { w = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (err) { w = {}; }
-    function set(side, px) {
-      var other = side === 'l' ? w.r || 360 : w.l || 280;
-      var max = Math.max(200, panes.clientWidth - other - 320); // leave the map at least 320px
-      px = Math.round(Math.max(side === 'l' ? 160 : 240, Math.min(max, px)));
-      w[side] = px;
-      panes.style.setProperty(side === 'l' ? '--lw' : '--rw', px + 'px');
-    }
     function save() { try { localStorage.setItem(KEY, JSON.stringify(w)); } catch (err) { /* private mode */ } }
-    if (w.l) set('l', w.l);
-    if (w.r) set('r', w.r);
-    ['l', 'r'].forEach(function (side) {
-      var hd = byId('rz' + side);
+    function clamp(px, min, max) { return Math.round(Math.max(min, Math.min(Math.max(min, max), px))); }
+    var parts = {
+      l: { el: work, prop: '--lw', set: function (ev) { return clamp(ev.clientX - work.getBoundingClientRect().left, 160, work.clientWidth - 320); } },
+      b: { el: dock, prop: '--dh', set: function (ev) { return clamp(dock.getBoundingClientRect().bottom - ev.clientY, 150, main.clientHeight - 120); } }
+    };
+    Object.keys(parts).forEach(function (side) {
+      var p = parts[side], hd = byId('rz' + side);
+      if (w[side]) p.el.style.setProperty(p.prop, w[side] + 'px');
       hd.addEventListener('pointerdown', function (e) {
         if (e.button !== 0) return;
         e.preventDefault();
         hd.setPointerCapture(e.pointerId);
         hd.classList.add('on'); document.body.classList.add('resizing');
-        var box = panes.getBoundingClientRect();
-        function move(ev) { set(side, side === 'l' ? ev.clientX - box.left : box.right - ev.clientX); draw(); }
+        function move(ev) { w[side] = p.set(ev); p.el.style.setProperty(p.prop, w[side] + 'px'); }
         function up() {
           hd.removeEventListener('pointermove', move); hd.removeEventListener('pointerup', up);
           hd.classList.remove('on'); document.body.classList.remove('resizing');
-          save(); draw();
+          save();
         }
         hd.addEventListener('pointermove', move); hd.addEventListener('pointerup', up);
       });
-      hd.addEventListener('dblclick', function () {
-        delete w[side]; panes.style.removeProperty(side === 'l' ? '--lw' : '--rw'); save(); draw();
-      });
+      hd.addEventListener('dblclick', function () { delete w[side]; p.el.style.removeProperty(p.prop); save(); });
     });
   })();
 
-  byId('fit').onclick = fit;
-  byId('zin').onclick = function () { centre(1.2); };
-  byId('zout').onclick = function () { centre(1 / 1.2); };
-
   // ── selection ──
-  function select(k, reveal_) {
+  function select(k, toDef) {
     var next = k === null || k === undefined || isNaN(k) ? null : k;
     if (next !== sel) refAt = -1;
     sel = next;
     qa('.sf-sym').forEach(function (b) { b.classList.toggle('on', Number(b.dataset.sel) === sel); });
     qa('.dl.sel').forEach(function (r) { r.classList.remove('sel'); });
     qa('.dl.hit').forEach(function (r) { r.classList.remove('hit', 'bad'); });
+    qa('.sym').forEach(function (s) { s.classList.toggle('cur', sel !== null && Number(s.dataset.k) === sel); });
     if (sel !== null) {
+      tab = 'u';
       // A large file stays collapsed until something in it is selected.
       [defRow[sel]].concat(syms[sel].refs.map(function (r) { return byId(r.el); })).forEach(function (el) {
-        var c = el && el.closest('.card.big');
+        var c = el && el.closest('.fsec.big');
         if (c) c.classList.remove('big');
       });
       if (defRow[sel]) defRow[sel].classList.add('sel');
@@ -247,56 +149,65 @@ export const CLIENT_SCRIPT = `
         el.classList.add('hit');
         if (r.bad) el.classList.add('bad');
       });
+      if (refAt < 0 && syms[sel].refs.length) refAt = 0;
     }
-    var wasShown = rightShown;
-    relayout();
-    renderDetail();
-    if (sel !== null && rightShown && !wasShown && W * s > vp.clientWidth) {
-      s = Math.max(0.25, (vp.clientWidth - 16) / W); tx = 0; apply();
-    }
-    if (sel !== null && reveal_) reveal(defRow[sel]);
+    renderDock();
+    if (sel !== null && toDef) reveal(defRow[sel]);
   }
-  function toggle(k, reveal_) { select(sel === k ? null : k, reveal_); }
+  function toggle(k) { select(sel === k ? null : k, true); }
+  function close() { tab = 'u'; select(null); }
 
-  cv.addEventListener('click', function (e) {
-    if (moved) return;
-    var gap = e.target.closest('.gap');
-    if (gap) { expandGap(gap); return; }
-    var big = e.target.closest('.bigbar');
-    if (big) { big.closest('.card').classList.remove('big'); relayout(); return; }
-    var ex = e.target.closest('.expand');
-    if (ex) { wholeFile(ex); return; }
-    if (window.getSelection().toString()) return;
-    if (D.mr && e.target.closest('.lo, .ln')) return; // in a merge request the line number starts a comment
-    // Like an editor: on a usage, go to the definition; on a definition, go to its usages.
-    var call = e.target.closest('.dl.call');
-    if (call) { goToDef(call); return; }
-    var row = e.target.closest('.dl.def');
-    if (row) goToRefs(Number(row.dataset.sel));
-  });
-  /** Clicking a line that calls a changed symbol selects that symbol and jumps to its definition. */
+  /** On a usage: select the symbol it calls and go to its definition. */
   function goToDef(row) {
-    var ks = callsOn[row.id];
+    var ks = callsOn[row.id || row.dataset.src];
+    if (!ks) return;
     // Several changed symbols called on one line: step through them on each click.
     var i = ks.indexOf(sel), k = ks[(i + 1) % ks.length];
     select(k, true);
   }
-  /** Clicking a definition selects it and jumps to its first usage; each further click, the next one. */
-  var refAt = -1;
+  /** On a definition: list its usages below; each further click goes to the next one. */
   function goToRefs(k) {
-    if (sel !== k) { select(k, false); refAt = -1; }
-    var refs = syms[k].refs;
-    if (!refs.length) { reveal(defRow[k]); return; }
-    refAt = (refAt + 1) % refs.length;
-    showRef(refs[refAt]);
-    renderDetail();
+    if (sel !== k) select(k, false);
+    else step(1);
   }
-  function showRef(r) {
-    if (r.out && !showOut) sw.click();
-    reveal(byId(r.el));
+  function step(d) {
+    if (sel === null) return;
+    var n = syms[sel].refs.length;
+    if (!n) return;
+    refAt = (refAt + d + n) % n;
+    showRef();
   }
+  /** Show the current usage: in the panel, and in the code when it is part of the diff. */
+  function showRef() {
+    renderDock();
+    var r = syms[sel].refs[refAt];
+    if (r && !r.out) reveal(byId(r.el));
+  }
+
+  document.addEventListener('click', function (e) {
+    var t = e.target, x;
+    if (!t.closest('#ed, #prev')) return;
+    if ((x = t.closest('.gap'))) { expandGap(x); return; }
+    if ((x = t.closest('.bigbar'))) { x.closest('.fsec').classList.remove('big'); return; }
+    if ((x = t.closest('.expand'))) { wholeFile(x); return; }
+    if ((x = t.closest('.fold'))) { x = x.closest('.fsec'); setShut(x, !x.classList.contains('shut')); return; }
+    if (t.closest('button, a, input, label, textarea, .thread, .composer')) return;
+    if (window.getSelection().toString()) return;
+    if (D.mr && t.closest('.lo, .ln')) return; // in a merge request the line number starts a comment
+    // Like an editor: on a usage, go to the definition; on a definition, show its usages.
+    var name = t.closest('.sym');
+    if (name) {
+      var k = Number(name.dataset.k);
+      if (name.dataset.def) goToRefs(k); else select(k, true);
+      return;
+    }
+    var call = t.closest('.dl.call');
+    if (call) { goToDef(call); return; }
+    var row = t.closest('.dl.def');
+    if (row) goToRefs(Number(row.dataset.sel));
+  });
   qa('.sf-sym').forEach(function (b) {
-    b.addEventListener('click', function () { toggle(Number(b.dataset.sel), true); });
+    b.addEventListener('click', function () { toggle(Number(b.dataset.sel)); });
   });
   qa('.tf-dir').forEach(function (b) {
     b.addEventListener('click', function () { b.setAttribute('aria-expanded', String(b.getAttribute('aria-expanded') === 'false')); });
@@ -305,14 +216,128 @@ export const CLIENT_SCRIPT = `
     b.addEventListener('click', function () { reveal(byId(b.dataset.card)); });
   });
   document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape' && sel !== null) select(null);
+    var typing = /^(INPUT|TEXTAREA)$/.test(e.target.tagName);
+    if (e.key === 'Escape' && !typing && dock.classList.contains('open')) close();
+    if (e.key === 'F4' && sel !== null) { e.preventDefault(); step(e.shiftKey ? -1 : 1); }
+    if (e.key === 'ArrowLeft' && e.altKey && !typing) { e.preventDefault(); back(); }
   });
-  var sw = byId('outsw');
-  sw.addEventListener('click', function () {
-    showOut = !showOut;
-    sw.setAttribute('aria-checked', String(showOut));
-    relayout();
+
+  // ── filter the explorer ──
+  byId('filter').addEventListener('input', function () {
+    var q = this.value.trim().toLowerCase();
+    qa('.sf').forEach(function (sf) {
+      var f = sf.querySelector('.sf-file'), all = !q || f.title.toLowerCase().indexOf(q) >= 0, any = all;
+      qa('.sf-sym', sf).forEach(function (b) {
+        var on = all || b.querySelector('.nm').textContent.toLowerCase().indexOf(q) >= 0;
+        b.hidden = !on;
+        if (on) any = true;
+      });
+      sf.hidden = !any;
+    });
+    qa('.tf').reverse().forEach(function (tf) { tf.hidden = !tf.querySelector('.sf:not([hidden])'); });
   });
+
+  // ── the panel under the code: usages of the selected symbol, and (merge requests) comments ──
+  function showTab(t) { tab = t; renderDock(); }
+  byId('tabu').onclick = function () { showTab('u'); };
+  if (byId('tabc')) byId('tabc').onclick = function () { showTab(tab === 'c' ? 'u' : 'c'); };
+  byId('closed').onclick = close;
+  byId('nextu').onclick = function () { step(1); };
+  byId('prevu').onclick = function () { step(-1); };
+
+  function renderDock() {
+    var cp = byId('cpane');
+    if (!cp) tab = 'u';
+    var open = sel !== null || tab === 'c', usages = tab === 'u' && sel !== null;
+    dock.classList.toggle('open', open);
+    byId('tabu').setAttribute('aria-selected', String(tab === 'u'));
+    if (cp) { byId('tabc').setAttribute('aria-selected', String(tab === 'c')); cp.hidden = tab !== 'c'; }
+    byId('upane').hidden = tab !== 'u';
+    byId('ucount').textContent = sel === null ? 0 : syms[sel].refs.length;
+    byId('closed').hidden = !open;
+    byId('prevu').hidden = byId('nextu').hidden = !usages || syms[sel].refs.length < 2;
+
+    var what = byId('what');
+    what.textContent = '';
+    // A caller shown in the preview goes back to where it is kept.
+    if (lent) { outsrc.appendChild(lent); lent = null; }
+    ulist.textContent = ''; prev.textContent = '';
+    if (!usages) {
+      if (tab === 'u') what.textContent = 'Click an underlined name in the code, or a symbol in the list, to see where it is used';
+      return;
+    }
+
+    var sy = syms[sel];
+    var n = sy.refs.length, nOut = sy.refs.filter(function (r) { return r.out; }).length;
+    var nImpl = sy.refs.filter(function (r) { return r.impl; }).length;
+
+    // Name, where it is, and one line of counts.
+    what.appendChild(h('span', 'wn st-' + sy.status, sy.name));
+    var go = btn('wl', sy.file + ':' + sy.line);
+    go.title = sy.kind + ' · show the definition';
+    go.addEventListener('click', function () { reveal(defRow[sel]); });
+    what.appendChild(go);
+    var facts = [];
+    if (sy.status === 'removed') facts.push(n ? 'removed, still used in ' + plural(n, 'place', 'places') : 'removed, no longer used');
+    else if (!n) facts.push(sy.status === 'added' ? 'new, not used yet' : 'no usages found');
+    if (n && nOut) facts.push(nOut + ' outside the diff');
+    if (nImpl) facts.push(plural(nImpl, 'implementation', 'implementations'));
+    if (facts.length) what.appendChild(h('span', 'wf' + (sy.status === 'removed' && n ? ' bad' : ''), '· ' + facts.join(' · ')));
+
+    if (!n) { ulist.appendChild(h('div', 'none', 'Nothing calls this symbol.')); return; }
+
+    // Usages, grouped by file: one short line each.
+    var last = null;
+    sy.refs.forEach(function (r, i) {
+      if (r.file !== last) { ulist.appendChild(h('div', 'rf mono' + (r.out ? ' out' : ''), r.file)); last = r.file; }
+      var b = btn('ref' + (r.bad ? ' bad' : '') + (i === refAt ? ' on' : ''));
+      b.title = r.text.trim();
+      b.appendChild(h('span', 'rn', String(r.line)));
+      b.appendChild(h('span', 'rt', r.text.trim()));
+      if (r.impl) b.appendChild(h('span', 'tag', 'implements'));
+      b.addEventListener('click', function () { refAt = i; showRef(); });
+      ulist.appendChild(b);
+    });
+    var on = ulist.querySelector('.ref.on');
+    if (on && on.scrollIntoView) on.scrollIntoView({ block: 'nearest' });
+    if (refAt >= 0) preview(sy.refs[refAt]);
+  }
+
+  /** The code around a usage. Outside the diff: the whole calling function. */
+  function preview(r) {
+    var el = byId(r.el);
+    var hd = h('div', 'ph');
+    hd.appendChild(h('span', 'pp mono', r.file + ':' + r.line));
+    var cp = btn('cbtn copy');
+    cp.dataset.path = r.file + ':' + r.line; cp.title = 'Copy location';
+    cp.appendChild(h('span', 'copy-label', 'Copy'));
+    hd.appendChild(cp);
+    if (r.out) hd.appendChild(h('span', 'po', 'outside the diff'));
+    prev.appendChild(hd);
+    if (!el) return;
+    if (r.out) {
+      lent = el.closest('.caller');
+      prev.appendChild(lent);
+      prev.scrollTop = Math.max(0, el.offsetTop - prev.clientHeight / 2);
+      return;
+    }
+    // Part of the diff: a read-only copy of the lines around it (the code above scrolls to the real one).
+    var rows = [el], a = el.previousElementSibling, z = el.nextElementSibling, i;
+    for (i = 0; i < 4 && a && !a.classList.contains('gap'); a = a.previousElementSibling) {
+      if (a.classList.contains('dl') && !a.classList.contains('far')) { rows.unshift(a); i++; }
+    }
+    for (i = 0; i < 4 && z && !z.classList.contains('gap'); z = z.nextElementSibling) {
+      if (z.classList.contains('dl') && !z.classList.contains('far')) { rows.push(z); i++; }
+    }
+    var box = h('div', 'code ro');
+    rows.forEach(function (row) {
+      var c = row.cloneNode(true);
+      if (row.id) { c.dataset.src = row.id; c.removeAttribute('id'); }
+      c.classList.remove('flash', 'has-c');
+      box.appendChild(c);
+    });
+    prev.appendChild(box);
+  }
 
   // ── folding: open part of a gap, or the whole file ──
   function expandGap(g) {
@@ -328,24 +353,23 @@ export const CLIENT_SCRIPT = `
       g.textContent = '⋯ ' + plural(left, 'unchanged line', 'unchanged lines') + ' · show more';
       g.dataset.n = left;
     }
-    relayout();
   }
-  function wholeFile(btn) {
-    var card = btn.closest('.card'), on = !card.classList.contains('whole');
-    card.classList.toggle('whole', on);
-    btn.setAttribute('aria-pressed', String(on));
-    btn.textContent = on ? 'Changes only' : 'Whole file';
-    btn.title = on ? 'Fold unchanged lines' : 'Show the whole file';
-    relayout();
+  function wholeFile(b) {
+    var sec = b.closest('.fsec'), on = !sec.classList.contains('whole');
+    sec.classList.toggle('whole', on);
+    b.setAttribute('aria-pressed', String(on));
+    b.textContent = on ? 'Changes only' : 'Whole file';
+    b.title = on ? 'Fold unchanged lines' : 'Show the whole file';
   }
   qa('.gap').forEach(function (g) {
     var n = Number(g.dataset.n);
     if (n > 20) g.textContent = g.textContent + ' · show more';
   });
 
-  // ── viewed progress (kept in this browser only) ──
-  // On the GitLab service the marks are saved on the server, per user; in a
-  // standalone report they stay in this browser.
+  // ── viewed files ──
+  // On the service the marks are saved on the server, per user; in a standalone
+  // report they stay in this browser. A viewed file is collapsed.
+  function fileId(sec) { return 'file:' + sec.dataset.path; }
   function loadViewed() {
     if (D.mr) return D.mr.viewed.reduce(function (o, id) { o[id] = true; return o; }, {});
     try { return JSON.parse(localStorage.getItem(D.key) || '[]').reduce(function (o, id) { o[id] = true; return o; }, {}); }
@@ -363,97 +387,36 @@ export const CLIENT_SCRIPT = `
     return Promise.resolve();
   }
   function updateViewed() {
-    var n = syms.filter(function (sy) { return viewed[sy.id]; }).length;
+    var n = 0;
+    files.forEach(function (sec) {
+      var on = !!viewed[fileId(sec)];
+      if (on) n++;
+      sec.classList.toggle('seen', on);
+      sec.querySelector('.fv').checked = on;
+      var b = document.querySelector('.sf-file[data-card="' + sec.id + '"]');
+      if (b) { b.classList.toggle('seen', on); b.querySelector('.vw').textContent = on ? '✓' : ''; }
+    });
     byId('vcount').textContent = n;
-    byId('vbar').style.width = (syms.length ? Math.round(n / syms.length * 100) : 0) + '%';
-    qa('.sf-sym').forEach(function (b) {
-      b.querySelector('.vw').textContent = viewed[syms[Number(b.dataset.sel)].id] ? '✓' : '';
-    });
+    byId('vbar').style.width = (files.length ? Math.round(n / files.length * 100) : 0) + '%';
   }
-
-  // ── details panel ──
-  function renderDetail() {
-    var ov = byId('ov'), dt = byId('dt');
-    dt.textContent = '';
-    if (sel === null) { ov.hidden = false; dt.hidden = true; return; }
-    ov.hidden = true; dt.hidden = false;
-    var sy = syms[sel];
-    var n = sy.refs.length, nOut = sy.refs.filter(function (r) { return r.out; }).length;
-    var nImpl = sy.refs.filter(function (r) { return r.impl; }).length;
-
-    // Name, kind and where it is, in one block.
-    var head = h('div', 'sec dhead');
-    var name = h('div', 'dname');
-    name.appendChild(h('h2', 'st-' + sy.status, sy.name));
-    name.appendChild(h('span', 'kind', sy.kind));
-    head.appendChild(name);
-    var loc = h('div', 'loc mono');
-    var go = h('button', 'link', sy.file + ':' + sy.line);
-    go.type = 'button'; go.title = 'Show in map';
-    go.addEventListener('click', function () { reveal(defRow[sel]); });
-    loc.appendChild(go);
-    var cp = h('button', 'cbtn copy');
-    cp.type = 'button'; cp.dataset.path = sy.file + ':' + sy.line; cp.title = 'Copy location';
-    cp.appendChild(h('span', 'copy-label', 'Copy'));
-    loc.appendChild(cp);
-    head.appendChild(loc);
-    dt.appendChild(head);
-
-    // One line of counts.
-    var facts = [];
-    if (sy.status === 'removed') facts.push(n ? 'removed, still used in ' + plural(n, 'place', 'places') : 'removed, no longer used');
-    else if (!n) facts.push(sy.status === 'added' ? 'new, not used yet' : 'no usages found');
-    else facts.push('used in ' + plural(n, 'place', 'places'));
-    if (n && nOut) facts.push(nOut + ' outside the change');
-    if (nImpl) facts.push(plural(nImpl, 'implementation', 'implementations'));
-    var sum = h('p', 'summary' + (sy.status === 'removed' && n ? ' bad' : ''), facts.join(' · '));
-    dt.appendChild(sum);
-
-    // Usages, grouped by file: one short line each, the full line on hover.
-    if (n) {
-      var groups = [], byFile = {};
-      sy.refs.forEach(function (r, i) {
-        if (!byFile[r.file]) { byFile[r.file] = { file: r.file, out: r.out, refs: [] }; groups.push(byFile[r.file]); }
-        byFile[r.file].refs.push({ r: r, i: i });
-      });
-      var rs = h('div', 'sec refs');
-      groups.forEach(function (g) {
-        rs.appendChild(h('div', 'rf mono' + (g.out ? ' out' : ''), g.file));
-        g.refs.forEach(function (x) {
-          var r = x.r;
-          var b = h('button', 'ref' + (r.bad ? ' bad' : '') + (x.i === refAt ? ' on' : ''));
-          b.type = 'button';
-          b.title = r.text.trim();
-          b.appendChild(h('span', 'rn mono', String(r.line)));
-          b.appendChild(h('span', 'rt mono', r.text.trim()));
-          if (r.impl) b.appendChild(h('span', 'tag', 'implements'));
-          b.addEventListener('click', function () { refAt = x.i; showRef(r); renderDetail(); });
-          rs.appendChild(b);
-        });
-      });
-      dt.appendChild(rs);
-    }
-
-    var act = h('div', 'actions');
-    var isV = !!viewed[sy.id];
-    var vb = h('button', 'btn ' + (isV ? 'viewed' : 'primary'), isV ? 'Viewed ✓' : 'Mark as viewed');
-    vb.type = 'button';
-    vb.setAttribute('aria-pressed', String(isV));
-    vb.addEventListener('click', function () {
-      var on = !viewed[sy.id];
-      if (on) viewed[sy.id] = true; else delete viewed[sy.id];
-      updateViewed(); renderDetail();
-      saveViewed(sy.id, on).catch(function () {
-        // Put it back and say so if the server could not save it.
-        if (on) delete viewed[sy.id]; else viewed[sy.id] = true;
-        updateViewed(); renderDetail();
-        var b = document.querySelector('#dt .btn');
-        if (b) b.textContent = 'Could not save. Try again';
-      });
-    });
-    act.appendChild(vb);
-    dt.appendChild(act);
+  function setViewed(sec, on) {
+    if (on) viewed[fileId(sec)] = true; else delete viewed[fileId(sec)];
+    setShut(sec, on);
+    updateViewed();
   }
+  ed.addEventListener('change', function (e) {
+    if (!e.target.classList.contains('fv')) return;
+    var sec = e.target.closest('.fsec'), on = e.target.checked;
+    setViewed(sec, on);
+    saveViewed(fileId(sec), on).catch(function () {
+      // Put it back and say so if the server could not save it.
+      setViewed(sec, !on);
+      var t = h('div', 'toast', 'Could not save "viewed" for ' + sec.dataset.path + '. Try again.');
+      t.setAttribute('role', 'status');
+      document.body.appendChild(t);
+      setTimeout(function () { t.remove(); }, 5000);
+    });
+  });
 
   // ── copy a path. The Clipboard API can be missing on file:// pages, so fall back. ──
   function copyText(text) {
@@ -483,13 +446,12 @@ export const CLIENT_SCRIPT = `
     });
   });
 
-  // Hooks for the merge-request script (comments change card heights).
-  window.diffmap = { relayout: relayout, wasDrag: function () { return moved; } };
+  // Hooks for the merge-request script.
+  window.diffmap = { reveal: reveal, showTab: showTab };
 
+  // Files already viewed start collapsed.
+  files.forEach(function (sec) { if (viewed[fileId(sec)]) setShut(sec, true); });
   updateViewed();
-  relayout(); fit();
-  window.addEventListener('load', relayout);
-  if (document.fonts && document.fonts.ready) document.fonts.ready.then(relayout);
-  window.addEventListener('resize', draw);
+  renderDock();
 })();
 `;

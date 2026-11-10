@@ -46,10 +46,7 @@ export const MR_CLIENT_SCRIPT = `
 
   // ── find code rows ──
   var cardByPath = {};
-  qa('.card.in').forEach(function (c) {
-    var b = c.querySelector('.copy');
-    if (b) cardByPath[b.dataset.path] = c;
-  });
+  qa('.fsec').forEach(function (c) { cardByPath[c.dataset.path] = c; });
   function rowFor(p) {
     var card = cardByPath[p.path];
     if (!card) return null;
@@ -61,11 +58,11 @@ export const MR_CLIENT_SCRIPT = `
     return null;
   }
   function lineInfo(row) {
-    var card = row.closest('.card');
+    var card = row.closest('.fsec, .caller');
     var o = row.querySelector('.lo').textContent, n = row.querySelector('.ln').textContent;
-    var out = card.classList.contains('out');
+    var out = card.classList.contains('caller'); // a caller outside the diff, shown in the usages panel
     return {
-      path: card.querySelector('.copy').dataset.path,
+      path: card.dataset.path,
       oldLine: out || row.classList.contains('add') || !o ? null : Number(o),
       newLine: row.classList.contains('del') || !n ? null : Number(n),
       code: row.querySelector('.tx').textContent,
@@ -100,11 +97,10 @@ export const MR_CLIENT_SCRIPT = `
       var c = composer({
         label: 'Reply',
         submit: function (body) { return post('/discussions/' + encodeURIComponent(d.id) + '/notes', { body: body }); },
-        done: function (note) { t.insertBefore(noteEl(note), c); c.replaceWith(rb); G.relayout(); },
-        cancel: function () { c.replaceWith(rb); G.relayout(); }
+        done: function (note) { t.insertBefore(noteEl(note), c); c.replaceWith(rb); },
+        cancel: function () { c.replaceWith(rb); }
       });
       rb.replaceWith(c);
-      G.relayout();
       c.querySelector('textarea').focus();
     });
     t.appendChild(rb);
@@ -149,17 +145,40 @@ export const MR_CLIENT_SCRIPT = `
   function bump() {
     count++;
     var el = byId('ccount');
-    if (el) el.textContent = count + (count === 1 ? ' comment' : ' comments');
+    if (el) el.textContent = count;
+    indexThreads();
   }
 
-  // ── general (not on a line) comments, in the overview panel ──
-  var ov = byId('ov');
-  var gen = h('div', 'sec');
-  gen.style.marginTop = '18px';
-  gen.appendChild(h('h3', '', 'Comments on this merge request'));
+  // ── the Comments tab: every thread on a line (click to go there), then general comments ──
+  var pane = byId('cpane');
+  var onLines = h('div');
+  pane.appendChild(onLines);
+  /** One line per thread that sits on a code line, in file order. */
+  function indexThreads() {
+    onLines.textContent = '';
+    var rows = qa('.fsec .dl.has-c');
+    onLines.hidden = !rows.length;
+    if (!rows.length) return;
+    onLines.appendChild(h('h3', '', 'On lines'));
+    rows.forEach(function (row) {
+      var info = lineInfo(row), t = row.nextElementSibling;
+      for (; t && (t.classList.contains('thread') || t.classList.contains('composer')); t = t.nextElementSibling) {
+        var first = t.querySelector('.note');
+        if (!first) continue;
+        var b = h('button', 'ref' + (t.classList.contains('resolved') ? ' resolved' : ''));
+        b.type = 'button';
+        b.appendChild(h('span', 'rn', info.path + ':' + (info.newLine !== null ? info.newLine : info.oldLine)));
+        b.appendChild(h('span', 'rt', first.querySelector('.nh b').textContent + ': ' + first.querySelector('.nb').textContent));
+        b.addEventListener('click', (function (r) { return function () { G.reveal(r); }; })(row));
+        onLines.appendChild(b);
+      }
+    });
+  }
+  var gen = h('div');
+  gen.appendChild(h('h3', '', 'On the whole ' + (M.hostName === 'GitHub' ? 'pull request' : 'merge request')));
   var genList = h('div');
   gen.appendChild(genList);
-  var newGen = h('button', 'btn', 'Write a comment');
+  var newGen = h('button', 'hbtn', 'Write a comment');
   newGen.type = 'button';
   newGen.addEventListener('click', function () {
     var c = composer({
@@ -171,7 +190,7 @@ export const MR_CLIENT_SCRIPT = `
     c.querySelector('textarea').focus();
   });
   if (!M.readOnly) gen.appendChild(newGen);
-  ov.appendChild(gen);
+  pane.appendChild(gen);
 
   // ── place existing threads ──
   M.discussions.forEach(function (d) {
@@ -179,19 +198,20 @@ export const MR_CLIENT_SCRIPT = `
     if (row) { insertAfterRow(row, threadEl(d)); row.classList.add('has-c'); }
     else genList.appendChild(threadEl(d));
   });
+  indexThreads();
 
   // Collapsed large files say how many comments they hide.
-  qa('.card.big').forEach(function (c) {
+  qa('.fsec.big').forEach(function (c) {
     var n = c.querySelectorAll('.thread').length;
     if (n) c.querySelector('.bigbar').appendChild(document.createTextNode(' · ' + n + (n === 1 ? ' comment' : ' comments')));
   });
 
   // ── click a line number to comment on that line ──
-  if (!M.readOnly) byId('cv').addEventListener('click', function (e) {
+  if (!M.readOnly) document.addEventListener('click', function (e) {
     var g = e.target.closest('.lo, .ln');
-    if (!g || G.wasDrag()) return;
+    if (!g) return;
     var row = g.closest('.dl');
-    if (!row || !row.closest('.card')) return;
+    if (!row || !row.closest('.fsec, .caller')) return; // not the read-only copies in the usages panel
     e.stopPropagation();
     qa('.composer.new').forEach(function (c) { c.remove(); });
     var info = lineInfo(row);
@@ -210,13 +230,11 @@ export const MR_CLIENT_SCRIPT = `
         row.classList.add('has-c');
         bump();
         if (r.fallback && !info.outside) toast(M.hostName + " can't attach a comment to this line, so it was posted as a general comment that quotes it.");
-        G.relayout();
       },
-      cancel: function () { c.remove(); G.relayout(); }
+      cancel: function () { c.remove(); }
     });
     c.classList.add('new');
     insertAfterRow(row, c);
-    G.relayout();
     c.querySelector('textarea').focus();
   }, true);
 
@@ -240,7 +258,5 @@ export const MR_CLIENT_SCRIPT = `
       showApprovals(M.approvals);
     });
   });
-
-  G.relayout();
 })();
 `;

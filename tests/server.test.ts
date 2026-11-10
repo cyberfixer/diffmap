@@ -163,7 +163,7 @@ describe("diffmap service", () => {
     expect(page).toContain("Download the code");
     expect(page).toContain("/api/team/api/-/merge_requests/42/status");
     const { html } = await openMap(cookie);
-    expect(html).toContain('class="card in"');
+    expect(html).toContain('class="fsec"');
   });
 
   it("opens the MR as a map with its title, approve button and comments", async () => {
@@ -178,7 +178,7 @@ describe("diffmap service", () => {
     expect(html).toContain(">Approve</button>");
     expect(html).toContain("Why trim here?");
     expect(html).toContain("/api/team/api/-/merge_requests/42");
-    expect(html).toContain('class="card in"');
+    expect(html).toContain('class="fsec"');
     expect(r.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
   });
 

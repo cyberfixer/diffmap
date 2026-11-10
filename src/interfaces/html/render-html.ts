@@ -33,7 +33,7 @@ export interface MrPage {
 
 export interface RenderOptions {
   mr?: MrPage;
-  /** Files longer than this start collapsed in the map (default 500). */
+  /** Files longer than this start collapsed (default 500). */
   maxLines?: number;
   /** The same for HTML files, which are often long and generated (default 300). */
   maxHtmlLines?: number;
@@ -58,14 +58,6 @@ const expandTabs = (s: string): string => s.replace(/\t/g, "  ");
 const scriptJson = (v: unknown): string =>
   JSON.stringify(v).replace(/</g, "\\u003c").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
 
-// Layout of the map canvas (px).
-export const MARGIN = 40;
-const LABEL_H = 28; // room for the column titles above the cards
-const LANES = 56; // space between the two columns
-const CODE_CHAR = 7.4;
-const CODE_GUTTER = 112; // two line-number columns, sign column and padding
-const MIN_W = 380;
-const MAX_W = 760;
 /** Unchanged lines within this distance of a change stay visible when a card is folded. */
 const NEAR = 3;
 
@@ -82,12 +74,6 @@ const KIND_LABEL: Record<string, string> = {
   template: "template",
   "top-level": "top-level code",
 };
-
-function codeWidth(lines: string[]): number {
-  let w = 0;
-  for (const l of lines) w = Math.max(w, expandTabs(l).length * CODE_CHAR + CODE_GUTTER);
-  return Math.round(Math.min(MAX_W, Math.max(MIN_W, w)));
-}
 
 /** A folder in the sidebar tree: sub-folders and the indexes of its files. */
 interface Folder {
@@ -216,7 +202,7 @@ interface SymInfo {
   refs: Ref[];
 }
 
-/** Render an AnalysisResult as one self-contained, interactive review page. */
+/** Render an AnalysisResult as one self-contained, interactive review page, laid out like a code editor. */
 export function renderHtml(
   result: AnalysisResult,
   highlighters: SyntaxHighlighterPort[] = [],
@@ -240,7 +226,6 @@ export function renderHtml(
   // Callers outside the diff: unchanged symbols in files that have no file view.
   const outCallers: GraphNode[] = [];
   const ciOf = new Map<string, number>();
-  const callsInto = new Map<string, Set<number>>(); // caller id -> changed symbols it calls
 
   const syms: SymInfo[] = changed.map((n) => {
     const diff = diffOf.get(n.id) ?? [];
@@ -280,7 +265,6 @@ export function renderHtml(
         ciOf.set(caller.id, outCallers.length);
         outCallers.push(caller);
       }
-      (callsInto.get(caller.id) ?? callsInto.set(caller.id, new Set()).get(caller.id)!).add(k);
     }
     for (const s of sites) {
       if (inDiff) {
@@ -299,11 +283,9 @@ export function renderHtml(
   }
   for (const s of syms) s.refs.sort((a, b) => Number(a.out) - Number(b.out) || a.file.localeCompare(b.file) || a.line - b.line);
 
-  // ── left column: one card per changed file ──
+  // ── the editor: every changed file, one under the other ──
   let addedLines = 0;
   let removedLines = 0;
-  // Collapsed large files don't make every card wide.
-  const leftW = Math.max(MIN_W, ...views.filter((v) => !isLargeFile(v, options)).map((v) => codeWidth(v.lines.map((l) => l.text))));
   const symsByFile = new Map<string, number[]>();
   changed.forEach((n, k) => symsByFile.set(n.file, [...(symsByFile.get(n.file) ?? []), k]));
 
@@ -312,7 +294,7 @@ export function renderHtml(
     del: v.lines.filter((l) => l.type === "del").length,
   }));
 
-  const leftCards = views
+  const fileSections = views
     .map((view, fi) => {
       const hl = hlFor(view.path);
       const tokens = hl ? highlightView(view, hl) : null;
@@ -363,45 +345,27 @@ export function renderHtml(
       const bigBar = large
         ? `<button class="bigbar" type="button">${total.toLocaleString("en-US")} lines · hidden because the file is large · <b>Show</b></button>`
         : "";
-      return `<section class="card in${large ? " big" : ""}" id="c${fi}" style="left:${MARGIN}px;width:${leftW}px">
-  <header class="ch">${pathHtml(view.path)}${copyButton(view.path)}${expand}<span class="cmeta"><span class="add">+${add}</span><span class="del">−${del}</span></span></header>
+      return `<section class="fsec${large ? " big" : ""}" id="c${fi}" data-path="${esc(view.path)}">
+  <header class="fh"><button class="fold" type="button" aria-expanded="true" title="Collapse or open this file" aria-label="Collapse or open ${esc(view.path)}"><span class="chev" aria-hidden="true"></span></button>${pathHtml(view.path)}${copyButton(view.path)}${expand}<span class="cmeta"><span class="add">+${add}</span><span class="del">−${del}</span></span><label class="vf" title="Mark this file as viewed and collapse it"><input type="checkbox" class="fv"> Viewed</label></header>
   ${bigBar}<div class="code">${rows.join("")}</div>
 </section>`;
     })
     .join("\n");
 
-  // ── right column: files outside the diff, one block per calling symbol ──
-  const outByFile = new Map<string, GraphNode[]>();
-  for (const c of outCallers) outByFile.set(c.file, [...(outByFile.get(c.file) ?? []), c]);
-  const outFiles = [...outByFile.keys()].sort();
-  const rightX = MARGIN + leftW + LANES;
-  const rightW = Math.max(MIN_W, ...outCallers.map((c) => codeWidth(c.code ?? [])));
-
-  const rightCards = outFiles
-    .map((file, oi) => {
-      const callers = outByFile.get(file)!.sort((a, b) => a.line - b.line);
-      const hl = hlFor(file);
-      const forCard = new Set<number>();
-      const blocks = callers
-        .map((c) => {
-          const ci = ciOf.get(c.id)!;
-          const ks = [...(callsInto.get(c.id) ?? [])];
-          ks.forEach((k) => forCard.add(k));
-          const code = c.code ?? [];
-          const tokens = hl && code.length ? hl.highlight(file, code) : null;
-          const rows = code
-            .map((text, i) => {
-              const n = c.line + i;
-              return `<div class="dl ctx" id="U${ci}-${n}"><span class="lo">${n}</span><span class="ln">${n}</span><span class="sg"></span><span class="tx">${tokensHtml(text, tokens?.[i])}</span></div>`;
-            })
-            .join("");
-          return `<div class="caller" data-for="${ks.join(" ")}">${rows || `<div class="deco">${esc(c.name)}</div>`}</div>`;
+  // ── callers outside the diff: each one's whole code, shown in the usages panel when picked ──
+  const outFiles = new Set(outCallers.map((c) => c.file));
+  const outBlocks = outCallers
+    .map((c, ci) => {
+      const hl = hlFor(c.file);
+      const code = c.code ?? [];
+      const tokens = hl && code.length ? hl.highlight(c.file, code) : null;
+      const rows = code
+        .map((text, i) => {
+          const n = c.line + i;
+          return `<div class="dl ctx" id="U${ci}-${n}"><span class="lo">${n}</span><span class="ln">${n}</span><span class="sg"></span><span class="tx">${tokensHtml(text, tokens?.[i])}</span></div>`;
         })
         .join("");
-      return `<section class="card out" id="o${oi}" data-for="${[...forCard].join(" ")}" style="left:${rightX}px;width:${rightW}px">
-  <header class="ch">${pathHtml(file)}${copyButton(file)}</header>
-  <div class="code">${blocks}</div>
-</section>`;
+      return `<div class="caller code" data-path="${esc(c.file)}">${rows || `<div class="deco" id="U${ci}-${c.line}">${esc(c.name)}</div>`}</div>`;
     })
     .join("\n");
 
@@ -413,11 +377,11 @@ export function renderHtml(
     const items = (symsByFile.get(v.path) ?? [])
       .map((k) => {
         const s = syms[k];
-        return `<button class="sf-sym" type="button" data-sel="${k}"><span class="b"><span class="nm mono st-${s.status}">${esc(s.name)}</span><span class="sub">${esc(s.kind)} · ${usesText(s.refs.length)}</span></span><span class="vw" aria-hidden="true"></span></button>`;
+        return `<button class="sf-sym mono" type="button" data-sel="${k}" title="${esc(s.name)} · ${esc(s.kind)} · ${usesText(s.refs.length)}"><span class="glyph st-${s.status}" aria-hidden="true">${esc(s.kind.charAt(0))}</span><span class="nm st-${s.status}">${esc(s.name)}</span><span class="ct">${s.refs.length}</span></button>`;
       })
       .join("");
     const status = v.status === "added" ? "added" : v.status === "deleted" ? "deleted" : "modified";
-    return `<div class="sf"><button class="sf-file mono fs-${status}" type="button" data-card="c${fi}" title="${esc(v.path)} · ${status}"><span class="p"><b>${esc(base)}</b></span><span class="n"><span class="add">+${fileStats[fi].add}</span> <span class="del">−${fileStats[fi].del}</span></span></button>${items}</div>`;
+    return `<div class="sf"><button class="sf-file mono fs-${status}" type="button" data-card="c${fi}" title="${esc(v.path)} · ${status}"><span class="p">${esc(base)}</span><span class="n"><span class="add">+${fileStats[fi].add}</span> <span class="del">−${fileStats[fi].del}</span></span><span class="vw" aria-hidden="true"></span></button>${items}</div>`;
   };
   const sidebar = renderTree(folderTree(views.map((v) => v.path)), fileRow);
 
@@ -439,18 +403,13 @@ export function renderHtml(
     : "";
 
   const outUses = syms.reduce((a, s) => a + s.refs.filter((r) => r.out).length, 0);
-  const outSummary = outFiles.length
-    ? `<span>${outUses} usage${outUses === 1 ? "" : "s"} in ${outFiles.length} file${outFiles.length === 1 ? "" : "s"} outside the diff</span>`
+  const outSummary = outFiles.size
+    ? `<span>${outUses} usage${outUses === 1 ? "" : "s"} in ${outFiles.size} file${outFiles.size === 1 ? "" : "s"} outside the diff</span>`
     : "";
 
   const data = {
     key: `diffmap:viewed:${result.base}..${result.head}`,
     syms,
-    leftX: MARGIN,
-    leftW,
-    rightX,
-    rightW,
-    top: MARGIN + LABEL_H,
     mr: mrPage
       ? {
           apiBase: mrPage.apiBase,
@@ -478,81 +437,52 @@ export function renderHtml(
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
 <style>${STYLE}</style>
 </head>
-<body class="show-out${mrPage ? " mr" : ""}${mrPage && !mrPage.readOnly ? " mr-write" : ""}">
+<body class="${mrPage ? "mr" : ""}${mrPage && !mrPage.readOnly ? " mr-write" : ""}">
 <header class="top">
-  <div class="brand"><svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2.5"></circle><circle cx="19" cy="6" r="2.5"></circle><circle cx="12" cy="18" r="2.5"></circle><path d="M7.5 6h9M6.5 8.2l4.2 7.6M17.5 8.2l-4.2 7.6"></path></svg><span>diffmap</span></div>
+  <div class="brand"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2.5"></circle><circle cx="19" cy="6" r="2.5"></circle><circle cx="12" cy="18" r="2.5"></circle><path d="M7.5 6h9M6.5 8.2l4.2 7.6M17.5 8.2l-4.2 7.6"></path></svg><span>diffmap</span></div>
   <div class="title"><div class="t">${mrPage ? `<a href="${esc(mrPage.mr.webUrl)}" title="Open in ${esc(mrPage.hostName ?? "GitLab")}">${esc(title)}</a>` : esc(title)}</div><div class="s mono">${esc(sub)}</div></div>
-  <div class="pills">
-    <span class="pill mono"><span class="add">+${addedLines}</span><span class="del">−${removedLines}</span></span>
-    <span class="pill">${views.length} file${views.length === 1 ? "" : "s"} · ${changed.length} symbol${changed.length === 1 ? "" : "s"}</span>
-    ${THEME_BUTTON}
+  <div class="acts">
     ${warnPill}
-    ${exactPill(result, mrPage?.indexState)}
     ${mrPage ? mrActions(mrPage) : ""}
+    ${THEME_BUTTON}
   </div>
 </header>
-<div class="panes" id="panes">
+<div class="work" id="work">
   <div class="rz l" id="rzl" title="Drag to resize · double-click to reset" aria-hidden="true"></div>
-  <div class="rz r" id="rzr" title="Drag to resize · double-click to reset" aria-hidden="true"></div>
   <aside class="side">
-    <div class="side-head"><h2>Changed files</h2><span>${views.length}</span></div>
-    <div class="side-list">${sidebar}</div>
-    <div class="progress">
-      <div class="r"><span>Viewed</span><span><span id="vcount">0</span> of ${changed.length} symbols</span></div>
-      <div class="bar"><div id="vbar"></div></div>
-    </div>
+    <div class="side-head"><span class="cap">Changes · ${views.length} file${views.length === 1 ? "" : "s"}</span><input id="filter" type="search" placeholder="Filter files and symbols" aria-label="Filter files and symbols"></div>
+    <nav class="side-list mono" aria-label="Changed files">${sidebar}</nav>
   </aside>
-  <main class="map">
-    <div class="map-head">
-      <div>
-        <h1>Change map</h1>
-        <div class="sub"><span>${changed.length} changed symbol${changed.length === 1 ? "" : "s"}</span>${outSummary}</div>
-      </div>
-      <div class="tools">
-        <button class="switch" id="outsw" type="button" role="switch" aria-checked="true"><span class="tr"><span class="kn"></span></span><span>Usages outside the diff</span></button>
-        <div class="zoom"><button type="button" id="zout" aria-label="Zoom out">−</button><span id="zpct">100%</span><button type="button" id="zin" aria-label="Zoom in">+</button><button type="button" class="fit" id="fit">Fit</button></div>
-      </div>
+  <main class="main" id="main">
+    <div class="ed" id="ed">
+      ${empty ? `<p class="empty">No changed files in this range.</p>` : ""}
+      ${fileSections}
     </div>
-    <div id="vp">
-      ${empty ? `<p class="empty" style="padding:40px;text-align:center">No changed files in this range.</p>` : ""}
-      <div id="cv">
-        <svg id="sv" width="10" height="10" aria-hidden="true">
-          <defs>
-            <marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z"/></marker>
-            <marker id="ah-bad" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z"/></marker>
-          </defs>
-          <g id="edges"></g>
-        </svg>
-        <div class="col-label" style="left:${MARGIN}px">Changed in this range</div>
-        <div class="col-label r" id="rlabel" style="left:${rightX}px">Where it is used · outside the diff</div>
-        ${leftCards}
-        ${rightCards}
+    <section class="dock" id="dock" aria-label="Usages">
+      <div class="rz b" id="rzb" title="Drag to resize · double-click to reset" aria-hidden="true"></div>
+      <div class="dtabs">
+        <button class="dtab" id="tabu" type="button" aria-selected="true">Usages<em id="ucount">0</em></button>
+        ${mrPage ? `<button class="dtab" id="tabc" type="button" aria-selected="false">Comments<em id="ccount">${mrPage.discussions.length}</em></button>` : ""}
+        <div class="what" id="what"></div>
+        <button class="mini" id="back" type="button" disabled title="Back to where you were (Alt+←)">← Back</button>
+        <button class="mini" id="prevu" type="button" hidden title="Previous usage (Shift+F4)" aria-label="Previous usage">↑</button>
+        <button class="mini" id="nextu" type="button" hidden title="Next usage (F4)" aria-label="Next usage">↓</button>
+        <button class="mini" id="closed" type="button" hidden title="Close (Esc)" aria-label="Close panel">✕</button>
       </div>
-    </div>
-    <div class="legend">
-      <span><span class="sw a"></span>Added line</span>
-      <span><span class="sw d"></span>Removed line</span>
-      <span><span class="sw u"></span>Uses the selected symbol</span>
-      <span><span class="sw o"></span>File not in diff</span>
-      <span style="margin-left:auto;color:var(--muted)">click a usage to go to its definition · click a definition to step through its usages · drag or scroll to move · ctrl+scroll to zoom · Esc clears</span>
-    </div>
+      <div class="dpane" id="upane"><div class="ulist" id="ulist"></div><div class="prev" id="prev"></div></div>
+      ${mrPage ? `<div class="cpane" id="cpane" hidden></div>` : ""}
+    </section>
   </main>
-  <aside class="detail" id="detail">
-    <div id="ov">
-      <div class="sec">
-        <div class="lbl">Overview</div>
-        <p class="summary">Pick a changed symbol in the list, or click its line in the map, to see where it is used.</p>
-      </div>
-      <div class="stats" style="margin-top:18px">
-        <div class="stat"><b>${views.length}</b><span>files changed</span></div>
-        <div class="stat"><b>${changed.length}</b><span>symbols changed</span></div>
-        <div class="stat"><b class="add">+${addedLines}</b><span>lines added</span></div>
-        <div class="stat"><b class="del">−${removedLines}</b><span>lines removed</span></div>
-      </div>
-      ${broken ? `<div class="warnbox" style="margin-top:18px">${broken === 1 ? "1 call still points" : `${broken} calls still point`} at code this change removes. Select the removed symbol to see them, highlighted in red.</div>` : ""}
-    </div>
-    <div id="dt" hidden></div>
-  </aside>
+</div>
+<footer class="status">
+  <span class="mono"><span class="add">+${addedLines}</span> <span class="del">−${removedLines}</span></span>
+  <span>${views.length} file${views.length === 1 ? "" : "s"} · ${changed.length} symbol${changed.length === 1 ? "" : "s"}</span>
+  ${outSummary}
+  ${exactNote(result, mrPage?.indexState)}
+  <span class="vprog">Viewed <span><span id="vcount">0</span> of ${views.length} file${views.length === 1 ? "" : "s"}</span><span class="bar"><span id="vbar"></span></span></span>
+</footer>
+<div id="outsrc" hidden>
+${outBlocks}
 </div>
 <script>var DIFFMAP = ${scriptJson(data)};</script>
 <script>${CLIENT_SCRIPT}</script>${mrPage ? `\n<script>${MR_CLIENT_SCRIPT}</script>` : ""}
@@ -570,24 +500,23 @@ function mrActions(p: MrPage): string {
   const label = a.userHasApproved ? "Revoke approval" : "Approve";
   const disabled = !a.userHasApproved && !a.userCanApprove ? " disabled title=\"You can't approve this merge request\"" : "";
   return `${approvedNote}
-    <span class="pill" id="ccount">${p.discussions.length} comment${p.discussions.length === 1 ? "" : "s"}</span>
     <a class="hbtn" href="${esc(p.mr.webUrl)}">Open in ${esc(p.hostName ?? "GitLab")}</a>
     ${p.readOnly ? `<span class="pill" title="This diffmap is view-only: comment and approve in ${esc(p.hostName ?? "GitLab")}">View only</span>` : `<button class="hbtn ${a.userHasApproved ? "" : "primary"}" id="approve" type="button" aria-pressed="${a.userHasApproved}"${disabled}>${label}</button>`}
     <form method="post" action="/auth/logout" class="who"><span title="Signed in as @${esc(p.user.username)}">${esc(p.user.name)}</span><button type="submit" class="link">Sign out</button></form>`;
 }
 
 /** Whether usages come from a compiler (exact) or from matching names. */
-function exactPill(result: AnalysisResult, indexState?: string): string {
+function exactNote(result: AnalysisResult, indexState?: string): string {
   const x = result.exactness;
   if (!x || x.total === 0) return "";
   if (indexState === "pending" && x.exact < x.total) {
-    return `<span class="pill" title="The CI job diffmap-index is still running for this commit. Reload in a minute for exact calls.">Calls: by name · exact index still building</span>`;
+    return `<span title="The CI job diffmap-index is still running for this commit. Reload in a minute for exact calls.">Calls: by name · exact index still building</span>`;
   }
   if (x.exact === x.total) {
-    return `<span class="pill" title="Calls are resolved by a compiler (TypeScript, or an index from CI)">Calls: exact</span>`;
+    return `<span title="Calls are resolved by a compiler (TypeScript, or an index from CI)">Calls: exact</span>`;
   }
   const title = "Calls in some languages are matched by name, so two functions with the same name can both be linked. Add a diffmap-index CI job for exact results (see README).";
   return x.exact === 0
-    ? `<span class="pill" title="${title}">Calls: matched by name</span>`
-    : `<span class="pill" title="${title}">Calls: exact in ${x.exact} of ${x.total} files</span>`;
+    ? `<span title="${title}">Calls: matched by name</span>`
+    : `<span title="${title}">Calls: exact in ${x.exact} of ${x.total} files</span>`;
 }

@@ -132,7 +132,7 @@ describe("view-only mode (no GitLab application)", () => {
     expect(html).not.toContain('id="approve"');
     expect(html).toContain('"readOnly":true');
     expect(html).toContain("Looks good"); // existing comments are still shown
-    expect(html).toContain('<body class="show-out mr">'); // no "mr-write": line numbers are not clickable
+    expect(html).toContain('<body class="mr">'); // no "mr-write": line numbers are not clickable
   });
 
   it("refuses comments, replies and approvals on the server too", async () => {

@@ -70,11 +70,13 @@ describe("renderHtml", () => {
     ],
   };
 
-  it("has the three panels: changed files, map and details", () => {
+  it("is laid out like an editor: file tree, code, usages panel below, status bar", () => {
     const html = renderHtml(result);
     expect(html).toContain('<aside class="side">');
-    expect(html).toContain('<main class="map">');
-    expect(html).toContain('<aside class="detail" id="detail">');
+    expect(html).toContain('<div class="ed" id="ed">');
+    expect(html).toContain('<section class="dock" id="dock"');
+    expect(html).toContain('<footer class="status">');
+    expect(html).not.toContain('id="cv"'); // no pan/zoom canvas
   });
 
   it("shows branch names, commit count and title in the top bar, with no approve buttons", () => {
@@ -87,8 +89,8 @@ describe("renderHtml", () => {
   it("lists each changed file with its changed symbols in the sidebar", () => {
     const html = renderHtml(result);
     expect(html.match(/class="sf-file/g)).toHaveLength(1);
-    expect(html.match(/class="sf-sym"/g)).toHaveLength(2);
-    expect(html).toContain("method · 2 usages"); // Svc.update: one call inside the diff, one outside
+    expect(html.match(/class="sf-sym mono"/g)).toHaveLength(2);
+    expect(html).toContain("Svc.update · method · 2 usages"); // Svc.update: one call inside the diff, one outside
   });
 
   it("groups files by folder in the sidebar, joining single-child folders", () => {
@@ -110,16 +112,18 @@ describe("renderHtml", () => {
     expect(html).toMatch(/class="sf-file mono fs-modified"/);
   });
 
-  it("tracks 'viewed', not 'approved'", () => {
+  it("tracks 'viewed' per file, not 'approved'", () => {
     const html = renderHtml(result);
-    expect(html).toContain("of 2 symbols");
-    expect(html).toContain("Mark as viewed");
+    expect(html).toContain("of 1 file<");
+    expect(html.match(/<input type="checkbox" class="fv">/g)).toHaveLength(1);
+    expect(html).toContain("'file:' + sec.dataset.path");
     expect(pageData(html).key).toBe(`diffmap:viewed:${sha("a")}..${sha("b")}`);
   });
 
-  it("shows one card per changed file, colour-coded with both line numbers", () => {
+  it("shows each changed file once, colour-coded with both line numbers, with a way to collapse it", () => {
     const html = renderHtml(result);
-    expect(html.match(/<section class="card in"/g)).toHaveLength(1);
+    expect(html.match(/<section class="fsec" id="c0" data-path="svc.ts"/g)).toHaveLength(1);
+    expect(html.match(/<button class="fold"/g)).toHaveLength(1);
     expect(html).toContain('class="dl add');
     expect(html).toContain('class="dl del');
     expect(html).toMatch(/<span class="lo">4<\/span><span class="ln"><\/span><span class="sg">−<\/span>/);
@@ -140,13 +144,13 @@ describe("renderHtml", () => {
     expect(html).toMatch(/class="dl del def" data-sel="1"/); // removed symbol starts on its removed line
   });
 
-  it("shows the whole caller outside the diff, hidden until a symbol is selected", () => {
+  it("keeps the whole caller outside the diff, for the usages panel to show when picked", () => {
     const html = renderHtml(result);
-    expect(html.match(/<section class="card out"/g)).toHaveLength(1);
-    expect(html).toContain('id="U0-9"');
-    expect(html.match(/id="U0-\d+"/g)).toHaveLength(4); // every line of Ctl.update
-    expect(html).toContain('data-for="0 1"'); // calls both changed symbols
-    expect(html).toMatch(/\.card\.out \{[^}]*display:none/);
+    const kept = html.slice(html.indexOf('<div id="outsrc" hidden>'));
+    expect(kept.match(/<div class="caller code" data-path="ctl.ts">/g)).toHaveLength(1);
+    expect(kept).toContain('id="U0-9"');
+    expect(kept.match(/id="U0-\d+"/g)).toHaveLength(4); // every line of Ctl.update
+    expect(html).toContain("2 usages in 1 file outside the diff");
   });
 
   it("gives the script each symbol's before/after and where it is used", () => {
@@ -191,15 +195,15 @@ describe("large files", () => {
 
   it("start collapsed above 500 lines, with a button to show them", () => {
     const html = page([file("big.py", 501), file("small.py", 500)]);
-    expect(html).toMatch(/<section class="card in big" id="c0"/);
+    expect(html).toMatch(/<section class="fsec big" id="c0"/);
     expect(html).toContain("501 lines · hidden because the file is large · <b>Show</b>");
-    expect(html).toMatch(/<section class="card in" id="c1"/);
+    expect(html).toMatch(/<section class="fsec" id="c1"/);
   });
 
   it("use a lower limit of 300 lines for HTML files", () => {
     const html = page([file("page.html", 301), file("ok.html", 300)]);
-    expect(html).toMatch(/<section class="card in big" id="c1"/); // sorted: ok.html is c0, page.html is c1
-    expect(html).toMatch(/<section class="card in" id="c0"/);
+    expect(html).toMatch(/<section class="fsec big" id="c1"/); // sorted: ok.html is c0, page.html is c1
+    expect(html).toMatch(/<section class="fsec" id="c0"/);
   });
 
   it("can use other limits", () => {
@@ -208,7 +212,7 @@ describe("large files", () => {
       [],
       { maxLines: 40 },
     );
-    expect(html).toContain('class="card in big"');
+    expect(html).toContain('class="fsec big"');
   });
 });
 
