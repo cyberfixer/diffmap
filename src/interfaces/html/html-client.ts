@@ -158,7 +158,6 @@ export const CLIENT_SCRIPT = `
     renderDock();
     if (sel !== null && toDef) reveal(defRow[sel]);
   }
-  function toggle(k) { select(sel === k ? null : k, true); }
   function close() { tab = 'u'; select(null); }
 
   /** On a usage: select the symbol it calls and go to its definition. */
@@ -212,13 +211,18 @@ export const CLIENT_SCRIPT = `
     if (row) goToRefs(Number(row.dataset.sel));
   });
   qa('.sf-sym').forEach(function (b) {
-    b.addEventListener('click', function () { toggle(Number(b.dataset.sel)); });
+    // Always goes to the definition, opening its file first when that is collapsed (Esc clears).
+    b.addEventListener('click', function () { select(Number(b.dataset.sel), true); });
   });
   qa('.tf-dir').forEach(function (b) {
     b.addEventListener('click', function () { b.setAttribute('aria-expanded', String(b.getAttribute('aria-expanded') === 'false')); });
   });
   qa('.sf-file').forEach(function (b) {
-    b.addEventListener('click', function () { reveal(byId(b.dataset.card)); });
+    b.addEventListener('click', function () {
+      var sec = byId(b.dataset.card);
+      setShut(sec, false); // a collapsed file opens when picked in the list
+      reveal(sec);
+    });
   });
 
   // ── keyboard (the status bar lists these) ──
@@ -243,7 +247,8 @@ export const CLIENT_SCRIPT = `
     if (sel !== null && (k === 'ArrowDown' || k === 'ArrowUp')) { e.preventDefault(); step(k === 'ArrowDown' ? 1 : -1); return; }
     if (sel !== null && k === 'ArrowRight') { e.preventDefault(); refAt = -1; showRef(); return; }
     k = k.toLowerCase();
-    if (k === 'n') fileStep(1);
+    if (k === '/') { e.preventDefault(); showTab('s'); byId('q').focus(); byId('q').select(); }
+    else if (k === 'n') fileStep(1);
     else if (k === 'p') fileStep(-1);
     else if (k === 'v') curFile().querySelector('.fv').click();
     else if (k === 'c') { var sec = curFile(); setShut(sec, !sec.classList.contains('shut')); }
@@ -267,6 +272,7 @@ export const CLIENT_SCRIPT = `
   // ── the panel under the code: usages of the selected symbol, and (merge requests) comments ──
   function showTab(t) { tab = t; renderDock(); }
   byId('tabu').onclick = function () { showTab('u'); };
+  byId('tabs').onclick = function () { showTab(tab === 's' ? 'u' : 's'); if (tab === 's') byId('q').focus(); };
   if (byId('tabc')) byId('tabc').onclick = function () { showTab(tab === 'c' ? 'u' : 'c'); };
   byId('closed').onclick = close;
   byId('nextu').onclick = function () { step(1); };
@@ -274,11 +280,13 @@ export const CLIENT_SCRIPT = `
 
   function renderDock() {
     var cp = byId('cpane');
-    if (!cp) tab = 'u';
-    var open = sel !== null || tab === 'c', usages = tab === 'u' && sel !== null;
+    if (!cp && tab === 'c') tab = 'u';
+    var open = sel !== null || tab !== 'u', usages = tab === 'u' && sel !== null;
     dock.classList.toggle('open', open);
     byId('tabu').setAttribute('aria-selected', String(tab === 'u'));
     if (cp) { byId('tabc').setAttribute('aria-selected', String(tab === 'c')); cp.hidden = tab !== 'c'; }
+    byId('tabs').setAttribute('aria-selected', String(tab === 's'));
+    byId('spane').hidden = tab !== 's';
     byId('upane').hidden = tab !== 'u';
     byId('ucount').textContent = sel === null ? 0 : syms[sel].refs.length;
     byId('closed').hidden = !open;
@@ -406,6 +414,58 @@ export const CLIENT_SCRIPT = `
     }
     copyRows(rows);
   }
+
+  // ── search: the text of the files in the diff only (every line of them, folded ones too) ──
+  (function () {
+    var q = byId('q'), list = byId('slist'), count = byId('qn'), MAX = 300, hits = [], at = -1, timer = null, index = null;
+    function build() {
+      index = [];
+      files.forEach(function (sec) {
+        qa('.dl', sec).forEach(function (row) {
+          index.push({ row: row, path: sec.dataset.path, text: row.querySelector('.tx').textContent });
+        });
+      });
+    }
+    function go(i) {
+      if (!hits.length) return;
+      at = (i + hits.length) % hits.length;
+      hits.forEach(function (x, j) { x.b.classList.toggle('on', j === at); });
+      if (hits[at].b.scrollIntoView) hits[at].b.scrollIntoView({ block: 'nearest' });
+      reveal(hits[at].row);
+    }
+    function run() {
+      var term = q.value.toLowerCase(), last = null, total = 0;
+      list.textContent = ''; hits = []; at = -1;
+      if (!term.trim()) { count.textContent = ''; return; }
+      if (!index) build();
+      index.forEach(function (x) {
+        var p = x.text.toLowerCase().indexOf(term);
+        if (p < 0) return;
+        total++;
+        if (hits.length >= MAX) return;
+        if (x.path !== last) { list.appendChild(h('div', 'rf mono', x.path)); last = x.path; }
+        var del = x.row.classList.contains('del');
+        var b = btn('ref' + (del ? ' del' : x.row.classList.contains('add') ? ' add' : ''));
+        b.title = del ? 'A removed line' : '';
+        b.appendChild(h('span', 'rn', x.row.querySelector(del ? '.lo' : '.ln').textContent));
+        var t = h('span', 'rt', (p > 40 ? '…' : '') + x.text.slice(Math.max(0, p - 40), p).replace(/^\\s+/, ''));
+        t.appendChild(h('mark', '', x.text.slice(p, p + term.length)));
+        t.appendChild(document.createTextNode(x.text.slice(p + term.length)));
+        b.appendChild(t);
+        var n = hits.length;
+        b.addEventListener('click', function () { go(n); });
+        list.appendChild(b);
+        hits.push({ b: b, row: x.row });
+      });
+      count.textContent = !total ? 'No lines match in the changed files'
+        : plural(total, 'line', 'lines') + (total > MAX ? ' · showing the first ' + MAX : '') + ' · Enter for the next one';
+    }
+    q.addEventListener('input', function () { clearTimeout(timer); timer = setTimeout(run, 150); });
+    q.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); clearTimeout(timer); if (at < 0 && !hits.length) run(); go(at + (e.shiftKey ? -1 : 1)); }
+      if (e.key === 'Escape') { q.blur(); close(); }
+    });
+  })();
 
   // ── folding ──
   // Unchanged lines far from a change are folded (class "far"). The bar in their place opens

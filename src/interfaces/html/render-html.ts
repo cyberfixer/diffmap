@@ -466,6 +466,7 @@ export function renderHtml(
       <div class="dtabs">
         <button class="dtab" id="tabu" type="button" aria-selected="true">Usages<em id="ucount">0</em></button>
         ${mrPage ? `<button class="dtab" id="tabc" type="button" aria-selected="false">Comments<em id="ccount">${mrPage.discussions.length}</em></button>` : ""}
+        <button class="dtab" id="tabs" type="button" aria-selected="false" title="Search the text of the files in this diff (/)">Search</button>
         <div class="what" id="what"></div>
         <button class="mini" id="back" type="button" disabled title="Back to where you were (← or Alt+←)">← Back</button>
         <button class="mini" id="prevu" type="button" hidden title="Previous usage (↑ or Shift+F4)" aria-label="Previous usage">↑</button>
@@ -473,6 +474,10 @@ export function renderHtml(
         <button class="mini" id="closed" type="button" hidden title="Close (Esc)" aria-label="Close panel">✕</button>
       </div>
       <div class="dpane" id="upane"><div class="ulist" id="ulist"></div><div class="prev" id="prev"></div></div>
+      <div class="spane" id="spane" hidden>
+        <div class="sbar"><input id="q" type="search" placeholder="Search in the changed files" aria-label="Search in the changed files" autocomplete="off" spellcheck="false"><span id="qn" aria-live="polite"></span></div>
+        <div class="slist" id="slist"></div>
+      </div>
       ${mrPage ? `<div class="cpane" id="cpane" hidden></div>` : ""}
     </section>
   </main>
@@ -482,7 +487,7 @@ export function renderHtml(
   <span>${views.length} file${views.length === 1 ? "" : "s"} · ${changed.length} symbol${changed.length === 1 ? "" : "s"}</span>
   ${outSummary}
   ${exactNote(result, mrPage?.indexState)}
-  <span class="keys" title="Keyboard shortcuts. The arrow keys move through usages while a symbol is selected; otherwise they scroll."><span><kbd>↑</kbd><kbd>↓</kbd> usages</span><span><kbd>→</kbd> definition</span><span><kbd>←</kbd> back</span><span><kbd>N</kbd><kbd>P</kbd> next / previous file</span><span><kbd>V</kbd> viewed</span><span><kbd>C</kbd> collapse</span><span><kbd>Esc</kbd> close</span></span>
+  <span class="keys" title="Keyboard shortcuts. The arrow keys move through usages while a symbol is selected; otherwise they scroll."><span><kbd>↑</kbd><kbd>↓</kbd> usages</span><span><kbd>→</kbd> definition</span><span><kbd>←</kbd> back</span><span><kbd>N</kbd><kbd>P</kbd> next / previous file</span><span><kbd>/</kbd> search</span><span><kbd>V</kbd> viewed</span><span><kbd>C</kbd> collapse</span><span><kbd>Esc</kbd> close</span></span>
   <span class="vprog">Viewed <span><span id="vcount">0</span> of ${views.length} file${views.length === 1 ? "" : "s"}</span><span class="bar"><span id="vbar"></span></span></span>
 </footer>
 <div id="outsrc" hidden>

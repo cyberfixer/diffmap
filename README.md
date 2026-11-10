@@ -280,9 +280,16 @@ nothing selected you see just the change.
 | `→` | Go to the selected function's definition |
 | `←` | Back to where you were before the last jump |
 | `N` / `P` | Next / previous file |
+| `/` | Search (see below) |
 | `V` | Mark the file at the top of the screen as viewed (or not viewed) |
 | `C` | Collapse or open that file |
 | `Esc` | Clear the selection and close the panel |
+
+**Search.** The **Search** tab of the bottom panel (or `/`) finds text in the
+files of the diff only: every line of them, also folded and removed ones, but
+nothing else in the repository. Results are grouped by file; click one, or press
+Enter / Shift+Enter in the box, to go to the line. Upper and lower case are
+treated the same.
 
 **Viewed files.** Tick **Viewed** in a file's header when you are done with it:
 the file collapses and is ticked in the tree. The arrow at the left of the header

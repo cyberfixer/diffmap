@@ -146,6 +146,13 @@ describe("renderHtml", () => {
     expect(html).toMatch(/\.dl\.far:not\(\.shown\) \{ display:none/);
   });
 
+  it("has a search box for the text of the changed files", () => {
+    const html = renderHtml(result);
+    expect(html).toContain('<button class="dtab" id="tabs"');
+    expect(html).toContain('placeholder="Search in the changed files"');
+    expect(html).toContain("<kbd>/</kbd> search");
+  });
+
   it("tells the script where each definition ends, and lists the keyboard shortcuts", () => {
     const html = renderHtml(result);
     expect(pageData(html).syms[0]).toMatchObject({ line: 4, end: 5 });

@@ -181,7 +181,7 @@ export const STYLE = `
   /* ── usages panel, docked under the code ── */
   .dock { position:relative; flex:none; display:flex; flex-direction:column; border-top:1px solid var(--line-strong); background:var(--panel); }
   .dock.open { height:var(--dh, 40%); min-height:150px; max-height:80%; }
-  .dock:not(.open) .rz, .dock:not(.open) .dpane, .dock:not(.open) .cpane { display:none; }
+  .dock:not(.open) .rz, .dock:not(.open) .dpane, .dock:not(.open) .cpane, .dock:not(.open) .spane { display:none; }
   .dtabs { flex:none; display:flex; align-items:center; gap:4px; min-height:34px; padding:0 8px; }
   .dock.open .dtabs { border-bottom:1px solid var(--line); }
   .dtab { height:34px; padding:0 8px; border:0; border-bottom:2px solid transparent; background:transparent; color:var(--muted); cursor:pointer; }
@@ -216,6 +216,15 @@ export const STYLE = `
   .ph { position:sticky; top:0; z-index:1; display:flex; align-items:center; gap:8px; min-height:30px; padding:2px 12px;
         background:var(--side); border-bottom:1px solid var(--line); font-size:12px; color:var(--muted); }
   .ph .pp { min-width:0; overflow-wrap:anywhere; }
+  /* search in the files of the diff */
+  .spane { flex:1; min-height:0; display:flex; flex-direction:column; }
+  .sbar { flex:none; display:flex; align-items:center; gap:12px; padding:8px 12px; border-bottom:1px solid var(--line); }
+  #q { flex:0 1 420px; min-width:0; height:28px; padding:0 8px; border:1px solid var(--line-strong); border-radius:5px; background:var(--bg);
+       color:var(--fg); font:12px var(--mono); }
+  #qn { font-size:12px; color:var(--muted); }
+  .slist { flex:1; min-height:0; overflow:auto; padding:6px; }
+  .slist mark { background:var(--accent-bg); color:var(--accent); font-weight:600; border-radius:2px; }
+  .ref.add .rn { color:var(--add-fg); } .ref.del .rn, .ref.del .rt { color:var(--del-fg); }
   .cpane { flex:1; min-height:0; overflow:auto; padding:10px 16px 16px; display:flex; flex-direction:column; gap:14px; }
   .cpane h3 { margin:0 0 4px; font-size:12px; font-weight:600; color:var(--muted); }
   .cpane .thread, .cpane .composer { margin:6px 0; max-width:720px; }
