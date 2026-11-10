@@ -1,6 +1,6 @@
 /**
  * Browser script for the HTML report. Reads the DIFFMAP data object written by
- * renderHtml and wires up selection, folding, arrows, "viewed" progress,
+ * renderHtml and wires up selection (highlights, go to definition / usages), folding, "viewed" progress,
  * pan and zoom. Kept free of template-literal syntax so it can live in a TS string.
  */
 export const CLIENT_SCRIPT = `
@@ -46,7 +46,13 @@ export const CLIENT_SCRIPT = `
   function stack() {
     var y = D.top;
     leftCards.forEach(function (c) { c.style.top = y + 'px'; y += c.offsetHeight + GAP; });
+    // Usages outside the diff sit next to the selected symbol, not at the top of the map.
     var y2 = D.top, on = outOn();
+    if (on && defRow[sel] && defRow[sel].offsetParent) {
+      var dc = defRow[sel].closest('.card');
+      y2 = Math.max(D.top, dc.offsetTop + defRow[sel].offsetTop - 40);
+    }
+    var outTop = y2;
     outCards.forEach(function (c) {
       var vis = on && has(c.dataset.for, sel);
       c.classList.toggle('vis', vis);
@@ -55,7 +61,7 @@ export const CLIENT_SCRIPT = `
       c.style.top = y2 + 'px';
       y2 += c.offsetHeight + GAP;
     });
-    rightShown = y2 > D.top;
+    rightShown = y2 > outTop;
     document.body.classList.toggle('show-out', rightShown);
     W = (rightShown ? D.rightX + D.rightW : D.leftX + D.leftW + 120) + D.leftX;
     H = Math.max(y, y2) - GAP + D.leftX;
@@ -70,31 +76,9 @@ export const CLIENT_SCRIPT = `
     return card.offsetTop + el.offsetTop + el.offsetHeight / 2;
   }
 
-  // ── arrows: from where a symbol is defined to each place it is used ──
-  function draw() {
-    var parts = [], nIn = 0, nOut = 0, x0 = D.leftX + D.leftW, on = outOn();
-    syms.forEach(function (sy, k) {
-      if (sel !== null && k !== sel) return;
-      var a = rowY(defRow[k]);
-      if (a === null) return;
-      sy.refs.forEach(function (r) {
-        if (r.out && !on) return;
-        var b = rowY(byId(r.el));
-        if (b === null) return;
-        var d;
-        if (!r.out) {
-          var lane = x0 + 14 + (nIn++ % 8) * 9;
-          d = 'M' + x0 + ',' + a + ' H' + lane + ' V' + b + ' H' + (x0 + 3);
-        } else {
-          var lane2 = x0 + 28 + (nOut++ % 12) * 12;
-          d = 'M' + x0 + ',' + a + ' H' + lane2 + ' V' + b + ' H' + (D.rightX - 3);
-        }
-        var cls = 'edge' + (r.bad ? ' bad' : '') + (r.impl ? ' impl' : '') + (sel !== null ? ' on' : '');
-        parts.push('<path class="' + cls + '" d="' + d + '" marker-end="url(#' + (r.bad ? 'ah-bad' : 'ah') + ')"/>');
-      });
-    });
-    eg.innerHTML = parts.join('');
-  }
+  // No arrows: the selected symbol's definition and every place it is used are highlighted
+  // instead, and clicking moves between them (see "selection").
+  function draw() { eg.textContent = ''; }
 
   function relayout() { stack(); draw(); }
 
@@ -146,12 +130,18 @@ export const CLIENT_SCRIPT = `
     drag = { x: e.clientX - tx, y: e.clientY - ty, sx: e.clientX, sy: e.clientY };
     vp.classList.add('drag');
   });
+  function endDrag() { drag = null; vp.classList.remove('drag'); }
   window.addEventListener('pointermove', function (e) {
     if (!drag) return;
+    // Released outside the window (no pointerup reached the page): stop here.
+    if (e.pointerType === 'mouse' && !(e.buttons & 1)) { endDrag(); return; }
     if (Math.abs(e.clientX - drag.sx) + Math.abs(e.clientY - drag.sy) > 4) moved = true;
     tx = e.clientX - drag.x; ty = e.clientY - drag.y; apply();
   });
-  window.addEventListener('pointerup', function () { drag = null; vp.classList.remove('drag'); });
+  window.addEventListener('pointerup', endDrag);
+  window.addEventListener('pointercancel', endDrag);
+  window.addEventListener('blur', endDrag);
+  vp.addEventListener('dragstart', function (e) { if (drag) e.preventDefault(); }); // no native drag of selected text
 
   // ── middle-button autoscroll, like a browser page ──
   // Hold the middle button and move away from where you pressed: the map scrolls
@@ -238,7 +228,9 @@ export const CLIENT_SCRIPT = `
 
   // ── selection ──
   function select(k, reveal_) {
-    sel = k === null || k === undefined || isNaN(k) ? null : k;
+    var next = k === null || k === undefined || isNaN(k) ? null : k;
+    if (next !== sel) refAt = -1;
+    sel = next;
     qa('.sf-sym').forEach(function (b) { b.classList.toggle('on', Number(b.dataset.sel) === sel); });
     qa('.dl.sel').forEach(function (r) { r.classList.remove('sel'); });
     qa('.dl.hit').forEach(function (r) { r.classList.remove('hit', 'bad'); });
@@ -275,10 +267,12 @@ export const CLIENT_SCRIPT = `
     var ex = e.target.closest('.expand');
     if (ex) { wholeFile(ex); return; }
     if (window.getSelection().toString()) return;
-    var row = e.target.closest('.dl.def');
-    if (row) { toggle(Number(row.dataset.sel), false); return; }
+    if (D.mr && e.target.closest('.lo, .ln')) return; // in a merge request the line number starts a comment
+    // Like an editor: on a usage, go to the definition; on a definition, go to its usages.
     var call = e.target.closest('.dl.call');
-    if (call && !(D.mr && e.target.closest('.lo, .ln'))) goToDef(call); // in a merge request the line number starts a comment
+    if (call) { goToDef(call); return; }
+    var row = e.target.closest('.dl.def');
+    if (row) goToRefs(Number(row.dataset.sel));
   });
   /** Clicking a line that calls a changed symbol selects that symbol and jumps to its definition. */
   function goToDef(row) {
@@ -287,8 +281,25 @@ export const CLIENT_SCRIPT = `
     var i = ks.indexOf(sel), k = ks[(i + 1) % ks.length];
     select(k, true);
   }
+  /** Clicking a definition selects it and jumps to its first usage; each further click, the next one. */
+  var refAt = -1;
+  function goToRefs(k) {
+    if (sel !== k) { select(k, false); refAt = -1; }
+    var refs = syms[k].refs;
+    if (!refs.length) { reveal(defRow[k]); return; }
+    refAt = (refAt + 1) % refs.length;
+    showRef(refs[refAt]);
+    renderDetail();
+  }
+  function showRef(r) {
+    if (r.out && !showOut) sw.click();
+    reveal(byId(r.el));
+  }
   qa('.sf-sym').forEach(function (b) {
     b.addEventListener('click', function () { toggle(Number(b.dataset.sel), true); });
+  });
+  qa('.tf-dir').forEach(function (b) {
+    b.addEventListener('click', function () { b.setAttribute('aria-expanded', String(b.getAttribute('aria-expanded') === 'false')); });
   });
   qa('.sf-file').forEach(function (b) {
     b.addEventListener('click', function () { reveal(byId(b.dataset.card)); });
@@ -361,13 +372,6 @@ export const CLIENT_SCRIPT = `
   }
 
   // ── details panel ──
-  function snippet(lines, cls) {
-    var MAX = 12, wrap = h('div', 'sec');
-    wrap.style.gap = '4px';
-    wrap.appendChild(h('pre', 'snip ' + cls, lines.slice(0, MAX).join('\\n')));
-    if (lines.length > MAX) wrap.appendChild(h('span', 'more', '+ ' + plural(lines.length - MAX, 'more line', 'more lines')));
-    return wrap;
-  }
   function renderDetail() {
     var ov = byId('ov'), dt = byId('dt');
     dt.textContent = '';
@@ -375,16 +379,19 @@ export const CLIENT_SCRIPT = `
     ov.hidden = true; dt.hidden = false;
     var sy = syms[sel];
     var n = sy.refs.length, nOut = sy.refs.filter(function (r) { return r.out; }).length;
+    var nImpl = sy.refs.filter(function (r) { return r.impl; }).length;
 
-    var head = h('div', 'sec');
-    head.style.gap = '6px';
-    head.appendChild(h('div', 'lbl', 'Selected'));
+    // Name, kind and where it is, in one block.
+    var head = h('div', 'sec dhead');
     var name = h('div', 'dname');
     name.appendChild(h('h2', 'st-' + sy.status, sy.name));
     name.appendChild(h('span', 'kind', sy.kind));
     head.appendChild(name);
     var loc = h('div', 'loc mono');
-    loc.appendChild(h('span', '', sy.file + ':' + sy.line));
+    var go = h('button', 'link', sy.file + ':' + sy.line);
+    go.type = 'button'; go.title = 'Show in map';
+    go.addEventListener('click', function () { reveal(defRow[sel]); });
+    loc.appendChild(go);
     var cp = h('button', 'cbtn copy');
     cp.type = 'button'; cp.dataset.path = sy.file + ':' + sy.line; cp.title = 'Copy location';
     cp.appendChild(h('span', 'copy-label', 'Copy'));
@@ -392,40 +399,37 @@ export const CLIENT_SCRIPT = `
     head.appendChild(loc);
     dt.appendChild(head);
 
-    var word = sy.status === 'added' ? 'Added' : sy.status === 'removed' ? 'Removed' : 'Changed';
-    var text;
-    if (n === 0) text = word + '. ' + (sy.status === 'added' ? 'Not called anywhere yet.' : 'No calls to it were found in the repo.');
-    else if (sy.status === 'removed') text = 'Removed, but still called in ' + plural(n, 'place', 'places') + '.';
-    else {
-      var nImpl = sy.refs.filter(function (r) { return r.impl; }).length;
-      text = word + '. Used in ' + plural(n, 'place', 'places') +
-        (nOut ? ': ' + (n - nOut) + ' inside this change, ' + nOut + ' outside it.' : ', all inside this change.') +
-        (nImpl ? ' ' + plural(nImpl, 'class implements', 'classes implement') + ' it.' : '');
-    }
-    dt.appendChild(h('p', 'summary', text));
+    // One line of counts.
+    var facts = [];
+    if (sy.status === 'removed') facts.push(n ? 'removed, still used in ' + plural(n, 'place', 'places') : 'removed, no longer used');
+    else if (!n) facts.push(sy.status === 'added' ? 'new, not used yet' : 'no usages found');
+    else facts.push('used in ' + plural(n, 'place', 'places'));
+    if (n && nOut) facts.push(nOut + ' outside the change');
+    if (nImpl) facts.push(plural(nImpl, 'implementation', 'implementations'));
+    var sum = h('p', 'summary' + (sy.status === 'removed' && n ? ' bad' : ''), facts.join(' · '));
+    dt.appendChild(sum);
 
-    if (sy.before.length || sy.after.length) {
-      var ch = h('div', 'sec');
-      ch.appendChild(h('h3', '', 'Change'));
-      if (sy.before.length) { ch.appendChild(h('span', 'lbl', sy.after.length ? 'Before' : 'Removed lines')); ch.appendChild(snippet(sy.before, 'b')); }
-      if (sy.after.length) { ch.appendChild(h('span', 'lbl', sy.before.length ? 'After' : 'Added lines')); ch.appendChild(snippet(sy.after, 'a')); }
-      dt.appendChild(ch);
-    }
-
+    // Usages, grouped by file: one short line each, the full line on hover.
     if (n) {
-      var rs = h('div', 'sec');
-      rs.appendChild(h('h3', '', (sy.status === 'removed' ? 'Still used in ' : 'Used in ') + plural(n, 'place', 'places')));
-      sy.refs.forEach(function (r) {
-        var b = h('button', 'ref' + (r.out ? ' out' : '') + (r.bad ? ' bad' : ''));
-        b.type = 'button';
-        b.title = r.out ? 'Outside the diff · show in map' : 'Show in map';
-        b.appendChild(h('span', 'rl', r.file + ':' + r.line + (r.impl ? '  · implements it' : '')));
-        b.appendChild(h('pre', 'snip c', r.text.trim()));
-        b.addEventListener('click', function () {
-          if (r.out && !showOut) sw.click();
-          reveal(byId(r.el));
+      var groups = [], byFile = {};
+      sy.refs.forEach(function (r, i) {
+        if (!byFile[r.file]) { byFile[r.file] = { file: r.file, out: r.out, refs: [] }; groups.push(byFile[r.file]); }
+        byFile[r.file].refs.push({ r: r, i: i });
+      });
+      var rs = h('div', 'sec refs');
+      groups.forEach(function (g) {
+        rs.appendChild(h('div', 'rf mono' + (g.out ? ' out' : ''), g.file));
+        g.refs.forEach(function (x) {
+          var r = x.r;
+          var b = h('button', 'ref' + (r.bad ? ' bad' : '') + (x.i === refAt ? ' on' : ''));
+          b.type = 'button';
+          b.title = r.text.trim();
+          b.appendChild(h('span', 'rn mono', String(r.line)));
+          b.appendChild(h('span', 'rt mono', r.text.trim()));
+          if (r.impl) b.appendChild(h('span', 'tag', 'implements'));
+          b.addEventListener('click', function () { refAt = x.i; showRef(r); renderDetail(); });
+          rs.appendChild(b);
         });
-        rs.appendChild(b);
       });
       dt.appendChild(rs);
     }
@@ -447,10 +451,7 @@ export const CLIENT_SCRIPT = `
         if (b) b.textContent = 'Could not save. Try again';
       });
     });
-    var sm = h('button', 'btn', 'Show in map');
-    sm.type = 'button';
-    sm.addEventListener('click', function () { reveal(defRow[sel]); });
-    act.appendChild(vb); act.appendChild(sm);
+    act.appendChild(vb);
     dt.appendChild(act);
   }
 

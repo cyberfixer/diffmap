@@ -8,6 +8,13 @@
 
 ## Done
 
+### 23. Review screen: editor-like navigation, less clutter — DONE
+- Sidebar is a folder tree (folders fold, single-child folders joined); file names coloured by added / modified / deleted; the map's cards follow the same order.
+- No arrows: the selected symbol's definition and usages are highlighted. Click a usage to go to the definition; click a definition to step through its usages.
+- Callers outside the change are placed next to the selected symbol, not at the top of the map.
+- Right panel: one header line, one line of counts, usages grouped by file one line each (before/after snippets dropped; the map shows them).
+- Fix: dragging the map no longer sticks when the button is released outside the window.
+
 ### 22. Smarter name matching (no compiler) — DONE
 - Still one pass over the files, no build, no new dependencies. Measured with `scripts/measure-links.ts` (calls to repo code linked to exactly one target): Spring PetClinic 93.1% → 94.4%, macrozheng/mall 83.0% → 87.7% (too many candidates 6.4% → 0.7%), Alamofire 57.8% → 66.9%.
 - Field and property types (`repo.save()`, `this.repo.save()`), also from Swift extensions and Go methods; calls on library types (`List`, `String`) are left out.

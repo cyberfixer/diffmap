@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { renderHtml } from "../src/interfaces/html/render-html.js";
+import { folderTree, renderHtml } from "../src/interfaces/html/render-html.js";
 import type { AnalysisResult } from "../src/domain/analysis-result.js";
 import type { GraphNode } from "../src/domain/graph.js";
 import type { DiffLine } from "../src/domain/symbol.js";
@@ -89,6 +89,25 @@ describe("renderHtml", () => {
     expect(html.match(/class="sf-file/g)).toHaveLength(1);
     expect(html.match(/class="sf-sym"/g)).toHaveLength(2);
     expect(html).toContain("method · 2 usages"); // Svc.update: one call inside the diff, one outside
+  });
+
+  it("groups files by folder in the sidebar, joining single-child folders", () => {
+    const t = folderTree([
+      "app/src/main/kotlin/ui/add/AddRepo.kt",
+      "app/src/main/kotlin/ui/add/AddRepoIntro.kt",
+      "app/src/main/kotlin/ui/list/List.kt",
+      "README.md",
+    ]);
+    expect(t.files).toEqual([3]);
+    expect(t.folders.map((f) => f.name)).toEqual(["app/src/main/kotlin/ui"]);
+    expect(t.folders[0].folders.map((f) => [f.name, f.files])).toEqual([["add", [0, 1]], ["list", [2]]]);
+    // Everything in one folder: the tree starts at that folder.
+    expect(folderTree(["a/b/x.ts", "a/b/y.ts"]).folders.map((f) => [f.name, f.files])).toEqual([["a/b", [0, 1]]]);
+  });
+
+  it("colours file names by what happened to them", () => {
+    const html = renderHtml(result);
+    expect(html).toMatch(/class="sf-file mono fs-modified"/);
   });
 
   it("tracks 'viewed', not 'approved'", () => {

@@ -21,7 +21,7 @@ flowchart LR
     GRAPH["3. Find references<br/>who uses them, where"]
   end
 
-  PAGE["4. Render the page<br/>files as cards, callers,<br/>arrows to exact lines"]
+  PAGE["4. Render the page<br/>files as cards, callers,<br/>exact lines highlighted"]
 
   CLI --> DIFF
   MR --> DIFF
@@ -172,7 +172,7 @@ server side (or in the CLI). The browser then only adds behaviour.
 flowchart LR
   R["render-html.ts<br/>cards, sidebar, header<br/>+ a DIFFMAP data object"] --> P["the page"]
   S["html-style.ts<br/>colours (light/dark), layout"] --> P
-  C["html-client.ts<br/>selection, folding, arrows,<br/>pan/zoom, viewed"] --> P
+  C["html-client.ts<br/>selection, go to definition/usages,<br/>folding, pan/zoom, viewed"] --> P
   M["html-client-mr.ts<br/>comments, replies, approve<br/>(service only)"] --> P
   T["theme.ts<br/>Auto / Light / Dark button"] --> P
 ```
@@ -182,10 +182,11 @@ flowchart LR
 - **Callers outside the change (right column):** pre-rendered but hidden; shown
   for the selected symbol only. Each caller is shown whole.
 - **The `DIFFMAP` object** in the page holds, per changed symbol, its before/after
-  lines and every place it is used, with the id of the row to draw an arrow to.
+  lines and every place it is used, with the id of the row to highlight.
 - **[html-client.ts](src/interfaces/html/html-client.ts)** stacks the cards from
-  their measured heights, draws the arrows as SVG, handles selection, folding,
-  pan/zoom and the "viewed" ticks.
+  their measured heights (callers outside the change next to the selected
+  symbol), highlights the selected symbol's lines, moves between a definition
+  and its usages on click, and handles folding, pan/zoom and the "viewed" ticks.
 - **[html-client-mr.ts](src/interfaces/html/html-client-mr.ts)** is added only on
   the service: comment threads under their lines, the comment box, Approve.
 

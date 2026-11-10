@@ -61,7 +61,7 @@ const scriptJson = (v: unknown): string =>
 // Layout of the map canvas (px).
 export const MARGIN = 40;
 const LABEL_H = 28; // room for the column titles above the cards
-const LANES = 200; // space between the two columns, where arrows run
+const LANES = 56; // space between the two columns
 const CODE_CHAR = 7.4;
 const CODE_GUTTER = 112; // two line-number columns, sign column and padding
 const MIN_W = 380;
@@ -87,6 +87,50 @@ function codeWidth(lines: string[]): number {
   let w = 0;
   for (const l of lines) w = Math.max(w, expandTabs(l).length * CODE_CHAR + CODE_GUTTER);
   return Math.round(Math.min(MAX_W, Math.max(MIN_W, w)));
+}
+
+/** A folder in the sidebar tree: sub-folders and the indexes of its files. */
+interface Folder {
+  name: string; // "" for the root; "a/b/c" when single-child folders are joined
+  folders: Folder[];
+  files: number[];
+}
+
+/** Files grouped by folder; a folder with only one sub-folder and no files is joined with it (src/main/java). */
+export function folderTree(paths: string[]): Folder {
+  const root: Folder = { name: "", folders: [], files: [] };
+  paths.forEach((path, i) => {
+    let at = root;
+    const parts = path.split("/");
+    for (const part of parts.slice(0, -1)) {
+      let next = at.folders.find((f) => f.name === part);
+      if (!next) at.folders.push((next = { name: part, folders: [], files: [] }));
+      at = next;
+    }
+    at.files.push(i);
+  });
+  const join = (f: Folder): Folder => {
+    let cur = { ...f, folders: f.folders.map(join) };
+    while (cur.name && cur.files.length === 0 && cur.folders.length === 1) {
+      const only = cur.folders[0];
+      cur = { name: `${cur.name}/${only.name}`, folders: only.folders, files: only.files };
+    }
+    return cur;
+  };
+  const out = join(root);
+  // The root with a single folder and no files: start the tree at that folder.
+  return out.files.length === 0 && out.folders.length === 1 ? { name: "", folders: out.folders, files: [] } : out;
+}
+
+/** File indexes in the order the tree shows them. */
+function treeOrder(f: Folder): number[] {
+  return [...f.folders.flatMap(treeOrder), ...f.files];
+}
+
+function renderTree(f: Folder, fileRow: (i: number) => string): string {
+  const kids = f.folders.map((d) => renderTree(d, fileRow)).join("") + f.files.map(fileRow).join("");
+  if (!f.name) return kids;
+  return `<div class="tf"><button class="tf-dir mono" type="button" aria-expanded="true" title="${esc(f.name)}"><span class="chev" aria-hidden="true"></span><span class="dn">${esc(f.name)}/</span></button><div class="tf-kids">${kids}</div></div>`;
 }
 
 function splitPath(file: string): { dir: string; base: string } {
@@ -180,7 +224,9 @@ export function renderHtml(
 ): string {
   const mrPage = options.mr;
   const hlFor = (file: string) => highlighters.find((h) => h.supportedExtensions.includes(extname(file)));
-  const views = [...(result.files ?? [])].sort((a, b) => a.path.localeCompare(b.path));
+  // Same order as the sidebar tree: folders first, then files, at every level.
+  const sorted = [...(result.files ?? [])].sort((a, b) => a.path.localeCompare(b.path));
+  const views = treeOrder(folderTree(sorted.map((v) => v.path))).map((i) => sorted[i]);
   const viewIdx = new Map(views.map((v, i) => [v.path, i]));
   const nodeById = new Map(result.nodes.map((n) => [n.id, n]));
 
@@ -359,20 +405,21 @@ export function renderHtml(
     })
     .join("\n");
 
-  // ── sidebar ──
+  // ── sidebar: a folder tree, like an editor's file explorer ──
   const usesText = (n: number) => (n === 0 ? "no usages" : n === 1 ? "1 usage" : `${n} usages`);
-  const sidebar = views
-    .map((v, fi) => {
-      const { dir, base } = splitPath(v.path);
-      const items = (symsByFile.get(v.path) ?? [])
-        .map((k) => {
-          const s = syms[k];
-          return `<button class="sf-sym" type="button" data-sel="${k}"><span class="b"><span class="nm mono st-${s.status}">${esc(s.name)}</span><span class="sub">${esc(s.kind)} · ${usesText(s.refs.length)}</span></span><span class="vw" aria-hidden="true"></span></button>`;
-        })
-        .join("");
-      return `<div class="sf"><button class="sf-file mono" type="button" data-card="c${fi}"><span class="p"><span>${esc(dir)}</span><b>${esc(base)}</b></span><span class="n"><span class="add">+${fileStats[fi].add}</span> <span class="del">−${fileStats[fi].del}</span></span></button>${items}</div>`;
-    })
-    .join("\n");
+  const fileRow = (fi: number): string => {
+    const v = views[fi];
+    const { base } = splitPath(v.path);
+    const items = (symsByFile.get(v.path) ?? [])
+      .map((k) => {
+        const s = syms[k];
+        return `<button class="sf-sym" type="button" data-sel="${k}"><span class="b"><span class="nm mono st-${s.status}">${esc(s.name)}</span><span class="sub">${esc(s.kind)} · ${usesText(s.refs.length)}</span></span><span class="vw" aria-hidden="true"></span></button>`;
+      })
+      .join("");
+    const status = v.status === "added" ? "added" : v.status === "deleted" ? "deleted" : "modified";
+    return `<div class="sf"><button class="sf-file mono fs-${status}" type="button" data-card="c${fi}" title="${esc(v.path)} · ${status}"><span class="p"><b>${esc(base)}</b></span><span class="n"><span class="add">+${fileStats[fi].add}</span> <span class="del">−${fileStats[fi].del}</span></span></button>${items}</div>`;
+  };
+  const sidebar = renderTree(folderTree(views.map((v) => v.path)), fileRow);
 
   // ── header ──
   const short = (sha: string) => sha.slice(0, 7);
@@ -485,12 +532,9 @@ export function renderHtml(
     <div class="legend">
       <span><span class="sw a"></span>Added line</span>
       <span><span class="sw d"></span>Removed line</span>
-      <span><span class="sw u"></span>Usage line</span>
+      <span><span class="sw u"></span>Uses the selected symbol</span>
       <span><span class="sw o"></span>File not in diff</span>
-      <span><span class="ln-s"></span>Used by</span>
-      <span><span class="ln-i"></span>Implemented by</span>
-      <span><span class="ln-r"></span>Call to removed code</span>
-      <span style="margin-left:auto;color:var(--muted)">drag or scroll to move · ctrl+scroll to zoom · click a usage line to go to its definition · Esc clears selection</span>
+      <span style="margin-left:auto;color:var(--muted)">click a usage to go to its definition · click a definition to step through its usages · drag or scroll to move · ctrl+scroll to zoom · Esc clears</span>
     </div>
   </main>
   <aside class="detail" id="detail">
@@ -505,7 +549,7 @@ export function renderHtml(
         <div class="stat"><b class="add">+${addedLines}</b><span>lines added</span></div>
         <div class="stat"><b class="del">−${removedLines}</b><span>lines removed</span></div>
       </div>
-      ${broken ? `<div class="warnbox" style="margin-top:18px">${broken === 1 ? "1 call still points" : `${broken} calls still point`} at code this change removes. They are drawn as red dashed arrows.</div>` : ""}
+      ${broken ? `<div class="warnbox" style="margin-top:18px">${broken === 1 ? "1 call still points" : `${broken} calls still point`} at code this change removes. Select the removed symbol to see them, highlighted in red.</div>` : ""}
     </div>
     <div id="dt" hidden></div>
   </aside>
@@ -532,7 +576,7 @@ function mrActions(p: MrPage): string {
     <form method="post" action="/auth/logout" class="who"><span title="Signed in as @${esc(p.user.username)}">${esc(p.user.name)}</span><button type="submit" class="link">Sign out</button></form>`;
 }
 
-/** Whether arrows come from a compiler (exact) or from matching names. */
+/** Whether usages come from a compiler (exact) or from matching names. */
 function exactPill(result: AnalysisResult, indexState?: string): string {
   const x = result.exactness;
   if (!x || x.total === 0) return "";

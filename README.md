@@ -2,7 +2,7 @@
 
 Review code changes as a map. diffmap finds which functions a change touches and
 where they are used, and shows everything on one page: the changed files, the
-code that calls them, and arrows between them. It feels like an editor, but
+code that calls them, highlighted. It feels like an editor, but
 focused on the change, so reviewers don't get lost.
 
 There are two ways to use it:
@@ -256,19 +256,17 @@ Good to know:
 | Part | What it shows |
 |---|---|
 | **Top bar** | Title (the MR title, or the first commit), branches, commit count, lines added/removed, whether calls are exact. On the service also Approve, comment count and a link to GitLab. |
-| **Left** | Changed files, the functions changed in each with how often they are used, and your "viewed" progress. |
+| **Left** | Changed files as a folder tree (folders fold; a file's name is green when added, amber when modified, red when deleted), the functions changed in each with how often they are used, and your "viewed" progress. |
 | **Middle** | The map. Each changed file as a card, green for added lines and red for removed ones, unchanged lines folded. Click "⋯ unchanged lines" or **Whole file** to see more. Files over 500 lines (HTML over 300) start collapsed; click **Show**. |
-| **Right** | The selected function: what changed (before/after), and every place it is used. Click a place to jump to it. |
+| **Right** | The selected function: where it is, how often it is used, and every place it is used, grouped by file, one line each. Click a place to jump to it. |
 
 Select a function (in the list, or by clicking its line) and the map adds the
-code that uses it **from outside the change**, each caller shown in full, with
-arrows to the exact lines. With nothing selected you see just the change.
-
-| Arrow | Meaning |
-|---|---|
-| solid | used by (called, created, referenced) |
-| dashed | implemented by (a class implementing an interface; needs an exact index or TypeScript interfaces) |
-| red dashed | still calls code this change removes |
+code that uses it **from outside the change**, next to the function, each caller
+shown in full. Its definition and every line that uses it are highlighted (red
+when the line still calls code the change removes). No arrows: move around like
+in an editor instead. Click a line that uses a changed function to **go to its
+definition**; click a definition to **go to its usages**, the next one on each
+click. With nothing selected you see just the change.
 
 Drag or scroll to move the map, Ctrl+scroll to zoom, Esc to clear the selection.
 The button in the top bar switches the colours between **Auto** (follows your
@@ -300,7 +298,7 @@ compiler:
   header says *exact index still building*) and switches to exact calls on a later visit.
 - **CLI:** `--scip index.scip`. Several index files can be passed, or joined with
   `cat a.scip b.scip > index.scip`.
-- An index also says which classes implement which interfaces: the dashed arrows.
+- An index also says which classes implement which interfaces (listed as "implements" among the usages).
 
 ### Angular
 
