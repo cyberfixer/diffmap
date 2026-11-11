@@ -232,6 +232,10 @@ In full mode you can also:
   line comment. A line in a file that isn't part of the review (a caller
   somewhere else) is posted as a general comment that quotes the line, because
   the host can't attach a comment there.
+- **Comment on a file:** click **Comment** next to the file's name to comment on
+  the file as a whole. It shows under the name, above the code, and on the host
+  as a file comment (GitHub, and GitLab 16.4 or newer; an older GitLab gets a
+  general comment that names the file).
 - **Reply:** existing comments show under their lines; click **Reply**.
 - **Approve:** works like the host's button. On GitHub this submits an
   "Approve" review; GitHub has no "unapprove", so **Revoke approval** dismisses
@@ -264,7 +268,7 @@ The page is laid out like a code editor.
 |---|---|
 | **Top bar** | Title (the MR title, or the first commit), branches and commit count. On the service also Approve and a link to GitLab. |
 | **Left** | Changed files as a folder tree (folders fold; a file's name is green when added, amber when modified, red when deleted), with the functions changed in each and how often they are used. Type in the box to filter. A ✓ marks files you have viewed. |
-| **Middle** | The code. Every changed file, one under the other, in one column you scroll like any page; the file's path stays pinned at the top while you are in it. Green for added lines and red for removed ones, unchanged lines folded. On a bar of folded lines, open 20 from its top, 20 from its bottom, or all of them; **Whole file** opens everything and **Changes only** folds it all again, including lines you opened by hand. Files over 500 lines (HTML over 300) start collapsed; click **Show**. |
+| **Middle** | The code. Every changed file, one under the other, in one column you scroll like any page; the file's path stays pinned at the top while you are in it. Green for added lines and red for removed ones, unchanged lines folded. On a line that was edited, the letters that changed have a stronger shade of the green or red. On a bar of folded lines, open 20 from its top, 20 from its bottom, or all of them; **Whole file** opens everything and **Changes only** folds it all again, including lines you opened by hand. Files over 500 lines (HTML over 300) start collapsed; click **Show**. |
 | **Bottom panel** | Opens when you select a function: every place it is used, grouped by file. Next to the list is the code around the usage you picked. The **Removed code** tab (only there when needed) lists every call that still points at code the change removes. |
 | **Status bar** | Lines added/removed, number of files and functions, whether calls are exact, the keyboard shortcuts, and how many files you have viewed. |
 
@@ -286,6 +290,13 @@ see just the change.
 the top bar says how many. Click that, or the **Removed code** tab, for the list
 of all of them, grouped by what was removed. Click one: the code goes to the
 removed function and the panel shows that call.
+
+**Arabic and other right-to-left text.** Code always stays left to right, and
+each Arabic or Hebrew phrase in it (a string, a comment) reads right to left in
+its place, without moving the quotes, numbers and operators around it. In files
+that are plain text (Markdown, translations, anything without syntax colours) a
+line that starts with Arabic is laid out right to left as a whole. Comments, the
+comment box and the review's title follow the direction of their text.
 
 **Big changes.** Files and list entries far from the screen are not drawn until
 you scroll near them, so the page stays quick with hundreds of files. Drag the
@@ -309,7 +320,8 @@ Enter / Shift+Enter in the box, to go to the line. Upper and lower case are
 treated the same.
 
 **Viewed files.** Tick **Viewed** in a file's header when you are done with it:
-the file collapses and is ticked in the tree. The arrow at the left of the header
+the file collapses and is ticked in the tree, and the code stays on that file's
+header, so the next file is right below. The arrow at the left of the header
 collapses or opens a file without marking it. In a report file the marks stay in
 your browser; on the service they are saved per person.
 

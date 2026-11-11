@@ -104,6 +104,7 @@ describe("GitHubClient", () => {
         { id: 2, body: "Because", user: { login: "sara" }, created_at: "t2", path: "a.py", line: 5, side: "RIGHT", in_reply_to_id: 1 },
         { id: 3, body: "Old line", user: u, created_at: "t3", path: "a.py", line: 9, side: "LEFT" },
         { id: 4, body: "Outdated", user: u, created_at: "t4", path: "a.py", line: null },
+        { id: 5, body: "Whole file", user: u, created_at: "t5", path: "a.py", line: null, subject_type: "file" },
       ]],
       [`GET ${R}/issues/42/comments?per_page=100&page=1`]: () => [200, [{ id: 9, body: "LGTM", user: u, created_at: "t9" }]],
     });
@@ -112,6 +113,7 @@ describe("GitHubClient", () => {
       ["rc-1", { path: "a.py", oldLine: null, newLine: 5 }, ["Why?", "Because"]],
       ["rc-3", { path: "a.py", oldLine: 9, newLine: null }, ["Old line"]],
       ["rc-4", null, ["Outdated"]],
+      ["rc-5", { path: "a.py", oldLine: null, newLine: null }, ["Whole file"]],
       ["issue-9", null, ["LGTM"]],
     ]);
     expect(ds[0].notes[0].author).toEqual({ name: "ali", username: "ali" });
@@ -136,6 +138,16 @@ describe("GitHubClient", () => {
 
     await expect(c.createDiscussion(mr, { body: "x", position: { path: "a.py", oldLine: null, newLine: 999 } })).rejects.toBeInstanceOf(PositionRejectedError);
     expect((await c.createDiscussion(mr, { body: "general" })).id).toBe("issue-8");
+  });
+
+  it("posts a comment on a file as a whole", async () => {
+    const f = fakeFetch({
+      [`POST ${R}/pulls/42/comments`]: () => [201, { id: 7, body: "hi", user: { login: "me" }, created_at: "t", path: "a.py", line: null, subject_type: "file" }],
+    });
+    const position = { path: "a.py", oldLine: null, newLine: null };
+    const d = await client(f).createDiscussion(mr, { body: "hi", position });
+    expect(f.calls[0].body).toEqual({ body: "hi", commit_id: "h".repeat(40), path: "a.py", subject_type: "file" });
+    expect(d.position).toEqual(position);
   });
 
   it("replies in a review thread, or with a new conversation comment", async () => {

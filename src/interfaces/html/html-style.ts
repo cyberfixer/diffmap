@@ -2,8 +2,8 @@
 const DARK_TOKENS = `
 --bg:#141413; --panel:#1B1B19; --side:#171715; --line:#2C2B28; --line-strong:#45443F;
 --fg:#ECEBE6; --fg2:#D3D2CC; --muted:#A3A199; --faint:#7D7B74; --chip:#232220; --hover:#282724;
---mod-fg:#E5C07B; --add-bg:#10291A; --add-gut:#173823; --add-fg:#6FD08C; --add-edge:#2F6B43;
---del-bg:#33161A; --del-gut:#4A1E22; --del-fg:#F28B82; --del-edge:#7A3A3A;
+--mod-fg:#E5C07B; --add-bg:#10291A; --add-gut:#173823; --add-fg:#6FD08C; --add-edge:#2F6B43; --add-hl:#236B3C;
+--del-bg:#33161A; --del-gut:#4A1E22; --del-fg:#F28B82; --del-edge:#7A3A3A; --del-hl:#8A2F36;
 --use-bg:#15233D; --use-gut:#1D3157; --accent:#7AA2F7; --accent-bg:#1A2A4A;
 --tk-keyword:#ff7b72; --tk-string:#a5d6ff; --tk-comment:#8b949e; --tk-number:#79c0ff;
 --tk-function:#d2a8ff; --tk-type:#ffa657; --tk-decorator:#7ee787;
@@ -18,8 +18,8 @@ export const STYLE = `
   :root {
     --bg:#F6F6F3; --panel:#FFFFFF; --side:#FAFAF7; --line:#E4E3DD; --line-strong:#C9C8C1;
     --fg:#1C1C1A; --fg2:#3A3935; --muted:#66655F; --faint:#8F8D85; --chip:#F2F1EC; --hover:#EDECE7;
-    --mod-fg:#8A5A00; --add-bg:#E6F4EA; --add-gut:#D3ECDB; --add-fg:#14532D; --add-edge:#8CC79E;
-    --del-bg:#FDECEC; --del-gut:#F8D8D8; --del-fg:#8E1B12; --del-edge:#E7A9A3;
+    --mod-fg:#8A5A00; --add-bg:#E6F4EA; --add-gut:#D3ECDB; --add-fg:#14532D; --add-edge:#8CC79E; --add-hl:#A3DDB6;
+    --del-bg:#FDECEC; --del-gut:#F8D8D8; --del-fg:#8E1B12; --del-edge:#E7A9A3; --del-hl:#F5B5B0;
     --use-bg:#EAF0FC; --use-gut:#D9E4F8; --accent:#2457C5; --accent-bg:#E8F0FE;
     --tk-keyword:#cf222e; --tk-string:#0a3069; --tk-comment:#6e7781; --tk-number:#0550ae;
     --tk-function:#8250df; --tk-type:#953800; --tk-decorator:#116329;
@@ -159,8 +159,13 @@ export const STYLE = `
   .dl .lo, .dl .ln { width:40px; flex:none; padding-right:6px; text-align:right; color:var(--faint); user-select:none; }
   .dl .sg { width:16px; flex:none; text-align:center; user-select:none; }
   .dl .tx { flex:1; min-width:0; padding-right:16px; white-space:pre-wrap; overflow-wrap:anywhere; }
+  /* A line of plain text that starts with Arabic or Hebrew is laid out right to left. */
+  .dl .tx[dir="rtl"] { padding-left:16px; }
   .dl.add { background:var(--add-bg); } .dl.add .lo, .dl.add .ln { background:var(--add-gut); color:var(--add-fg); } .dl.add .sg { color:var(--add-fg); }
   .dl.del { background:var(--del-bg); } .dl.del .lo, .dl.del .ln { background:var(--del-gut); color:var(--del-fg); } .dl.del .sg { color:var(--del-fg); }
+  /* On an edited line, the letters that changed: a stronger shade of the line's colour. */
+  .dl.add .chg { background:var(--add-hl); border-radius:2px; }
+  .dl.del .chg { background:var(--del-hl); border-radius:2px; }
   .dl.def, .dl.call { cursor:pointer; }
   .dl.sel { box-shadow:inset 3px 0 0 var(--fg); }
   .dl.hit { box-shadow:inset 3px 0 0 var(--accent); }
@@ -219,7 +224,7 @@ export const STYLE = `
   .ref:hover { background:var(--hover); }
   .ref.on { background:var(--accent-bg); }
   .ref .rn { flex:none; min-width:3ch; text-align:right; color:var(--faint); }
-  .ref .rt { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .ref .rt { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; unicode-bidi:plaintext; }
   .ref .tag { flex:none; font:11px var(--sans); color:var(--muted); }
   .ref.bad .rt { color:var(--del-fg); }
   .ref .rp { flex:none; max-width:45%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted); }
@@ -273,6 +278,11 @@ export const STYLE = `
   .thread, .composer { margin:4px 16px 8px 96px; max-width:720px; border:1px solid var(--line-strong); border-radius:6px; background:var(--panel);
                        font:13px/1.45 var(--sans); color:var(--fg); cursor:auto; }
   .thread.resolved { opacity:.65; }
+  /* Comments on a file as a whole: under its name, above its code. */
+  .fcs { background:var(--side); border-bottom:1px solid var(--line); }
+  .fcs:empty, .fsec.shut .fcs { display:none; }
+  .fcs .thread, .fcs .composer { margin:8px 16px; }
+  .composer textarea, .nb { unicode-bidi:plaintext; }
   .note { padding:8px 10px; } .note + .note { border-top:1px solid var(--line); }
   .nh { font-size:12px; color:var(--muted); margin-bottom:2px; } .nh b { color:var(--fg); font-weight:600; }
   .nb { white-space:pre-wrap; overflow-wrap:anywhere; }

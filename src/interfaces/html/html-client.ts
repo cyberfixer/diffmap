@@ -49,24 +49,40 @@ export const CLIENT_SCRIPT = `
   function markName(row, k, def) {
     var name = shortName(syms[k].name), tx = row.querySelector('.tx');
     if (!name || !tx) return;
-    var w = document.createTreeWalker(tx, NodeFilter.SHOW_TEXT), n;
-    while ((n = w.nextNode())) {
-      if (n.parentNode.classList.contains('sym')) continue;
-      var t = n.nodeValue, at = -1, from = 0;
-      while ((at = t.indexOf(name, from)) >= 0) {
-        var b = at ? t.charAt(at - 1) : '', a = t.charAt(at + name.length);
-        if (!/[A-Za-z0-9_$]/.test(b) && !/[A-Za-z0-9_$]/.test(a)) break;
-        from = at + 1;
+    // The name can run over several pieces of the line (syntax colours, changed letters),
+    // so look for it in the whole line and then find the pieces it covers.
+    var parts = [], text = '', w = document.createTreeWalker(tx, NodeFilter.SHOW_TEXT), n;
+    while ((n = w.nextNode())) { parts.push({ n: n, at: text.length }); text += n.nodeValue; }
+    function part(pos, end) {
+      for (var i = parts.length - 1; i >= 0; i--) {
+        if (parts[i].at < pos || (!end && parts[i].at === pos)) return parts[i];
       }
-      if (at < 0) continue;
-      var mid = n.splitText(at); mid.splitText(name.length);
-      var s = h('span', 'sym');
-      s.dataset.k = k;
-      if (def) s.dataset.def = '1';
-      mid.parentNode.replaceChild(s, mid); s.appendChild(mid);
-      (symSpans[k] = symSpans[k] || []).push(s);
-      return;
+      return parts[0];
     }
+    var at = -1, from = 0;
+    while ((at = text.indexOf(name, from)) >= 0) {
+      var b = at ? text.charAt(at - 1) : '', a = text.charAt(at + name.length);
+      var taken = part(at, false).n.parentNode.closest('.sym'); // already another symbol's name
+      if (!/[A-Za-z0-9_$]/.test(b) && !/[A-Za-z0-9_$]/.test(a) && !taken) break;
+      from = at + 1;
+    }
+    if (at < 0) return;
+    var p0 = part(at, false), p1 = part(at + name.length, true);
+    var s = h('span', 'sym');
+    s.dataset.k = k;
+    if (def) s.dataset.def = '1';
+    if (p0.n === p1.n) {
+      // The usual case, and the quick one: the name is inside one piece.
+      var mid = p0.n.splitText(at - p0.at); mid.splitText(name.length);
+      mid.parentNode.replaceChild(s, mid); s.appendChild(mid);
+    } else {
+      var r = document.createRange();
+      r.setStart(p0.n, at - p0.at);
+      r.setEnd(p1.n, at + name.length - p1.at);
+      s.appendChild(r.extractContents());
+      r.insertNode(s);
+    }
+    (symSpans[k] = symSpans[k] || []).push(s);
   }
   Object.keys(defRow).forEach(function (k) { markName(defRow[k], Number(k), true); });
   Object.keys(callsOn).forEach(function (id) {
@@ -75,9 +91,15 @@ export const CLIENT_SCRIPT = `
 
   // ── moving around the code ──
   function setShut(sec, on) {
+    // Collapsing a file from somewhere inside it removes everything between its header and
+    // the screen, which would pull many later files past the reader. Stay on its header.
+    var inside = on && !sec.classList.contains('shut') && sec.getBoundingClientRect().top < ed.getBoundingClientRect().top;
     sec.classList.toggle('shut', on);
     sec.querySelector('.fold').setAttribute('aria-expanded', String(!on));
+    if (inside) ed.scrollTop += sec.getBoundingClientRect().top - ed.getBoundingClientRect().top;
   }
+  // A path with right-to-left names (Arabic, Hebrew) keeps its folders in order, left to right.
+  function lp(path) { return /[\\u0590-\\u08FF\\uFB1D-\\uFDFF\\uFE70-\\uFEFC]/.test(path) ? path.split('/').join('/\\u200E') : path; }
   /**
    * Scroll a row (or a whole file) into view, a third of the way down, and flash it.
    * "from" is where the reader was (see here()), for Back; left out, it is taken now.
@@ -326,13 +348,13 @@ export const CLIENT_SCRIPT = `
         if (!head) {
           var hd = h('div', 'rf mono');
           hd.appendChild(h('span', 'gone', sy.name));
-          hd.appendChild(document.createTextNode(' · removed from ' + sy.file));
+          hd.appendChild(document.createTextNode(' · removed from ' + lp(sy.file)));
           list.appendChild(hd);
           head = true;
         }
         var b = btn('ref bad');
         b.title = 'Show this call, and the removed code it points at';
-        b.appendChild(h('span', 'rp', r.file + ':' + r.line));
+        b.appendChild(h('span', 'rp', lp(r.file) + ':' + r.line));
         b.appendChild(h('span', 'rt', r.text.trim()));
         if (r.out) b.appendChild(h('span', 'tag', 'outside the diff'));
         // The code goes to what was removed; the Usages tab shows this call.
@@ -377,7 +399,7 @@ export const CLIENT_SCRIPT = `
 
     // Name, where it is, and one line of counts.
     what.appendChild(h('span', 'wn st-' + sy.status, sy.name));
-    var go = btn('wl', sy.file + ':' + sy.line);
+    var go = btn('wl', lp(sy.file) + ':' + sy.line);
     go.title = sy.kind + ' · go to the definition in the code above';
     go.addEventListener('click', function () { reveal(defRow[sel]); });
     what.appendChild(go);
@@ -392,7 +414,7 @@ export const CLIENT_SCRIPT = `
     if (!n) ulist.appendChild(h('div', 'none', 'Nothing calls this symbol.'));
     var last = null;
     sy.refs.forEach(function (r, i) {
-      if (r.file !== last) { ulist.appendChild(h('div', 'rf mono' + (r.out ? ' out' : ''), r.file)); last = r.file; }
+      if (r.file !== last) { ulist.appendChild(h('div', 'rf mono' + (r.out ? ' out' : ''), lp(r.file))); last = r.file; }
       var b = btn('ref' + (r.bad ? ' bad' : '') + (i === refAt ? ' on' : ''));
       b.title = r.text.trim();
       b.appendChild(h('span', 'rn', String(r.line)));
@@ -408,7 +430,7 @@ export const CLIENT_SCRIPT = `
 
   function previewHead(where, note) {
     var hd = h('div', 'ph');
-    hd.appendChild(h('span', 'pp mono', where));
+    hd.appendChild(h('span', 'pp mono', lp(where)));
     var cp = btn('cbtn copy');
     cp.dataset.path = where; cp.title = 'Copy location';
     cp.appendChild(h('span', 'copy-label', 'Copy'));
@@ -488,7 +510,7 @@ export const CLIENT_SCRIPT = `
         if (p < 0) return;
         total++;
         if (hits.length >= MAX) return;
-        if (x.path !== last) { list.appendChild(h('div', 'rf mono', x.path)); last = x.path; }
+        if (x.path !== last) { list.appendChild(h('div', 'rf mono', lp(x.path))); last = x.path; }
         var del = x.row.classList.contains('del');
         var b = btn('ref' + (del ? ' del' : x.row.classList.contains('add') ? ' add' : ''));
         b.title = del ? 'A removed line' : '';
@@ -660,7 +682,7 @@ export const CLIENT_SCRIPT = `
   });
 
   // Hooks for the merge-request script.
-  window.diffmap = { reveal: reveal, showTab: showTab };
+  window.diffmap = { reveal: reveal, showTab: showTab, setShut: setShut, lp: lp };
 
   // Files already viewed start collapsed.
   files.forEach(function (sec) { if (isViewed(sec)) setShut(sec, true); });

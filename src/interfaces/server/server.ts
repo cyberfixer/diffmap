@@ -118,7 +118,8 @@ function readPosition(v: unknown): LinePosition | undefined {
   const line = (x: unknown) => (x === null || x === undefined ? null : Number.isInteger(x) && (x as number) > 0 ? (x as number) : NaN);
   const oldLine = line(p.oldLine);
   const newLine = line(p.newLine);
-  if (typeof p.path !== "string" || !p.path || Number.isNaN(oldLine) || Number.isNaN(newLine) || (oldLine === null && newLine === null)) {
+  // Both lines null is a comment on the file as a whole.
+  if (typeof p.path !== "string" || !p.path || Number.isNaN(oldLine) || Number.isNaN(newLine)) {
     throw new HttpError(400, "Invalid line position.");
   }
   return { path: p.path, oldLine, newLine };

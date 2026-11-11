@@ -181,7 +181,8 @@ export class GitLabClient implements MergeRequestHostPort {
     const body: Record<string, unknown> = { body: comment.body };
     if (p) {
       body.position = {
-        position_type: "text",
+        // Both lines null: a comment on the file as a whole (GitLab 16.4 and newer; older ones answer 400).
+        position_type: p.oldLine === null && p.newLine === null ? "file" : "text",
         base_sha: mr.diffRefs.baseSha,
         start_sha: mr.diffRefs.startSha,
         head_sha: mr.diffRefs.headSha,
@@ -195,7 +196,7 @@ export class GitLabClient implements MergeRequestHostPort {
       const d = await this.call<GlDiscussion>("POST", `${this.mrPath(mr.projectPath, mr.iid)}/discussions`, body);
       return toDiscussion(d)!;
     } catch (err) {
-      // GitLab answers 400 when the line cannot carry a diff comment.
+      // GitLab answers 400 when the line (or, on old versions, a file) cannot carry a diff comment.
       if (p && err instanceof HostError && err.status === 400) throw new PositionRejectedError(err.message);
       throw err;
     }

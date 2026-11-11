@@ -130,6 +130,17 @@ describe("GitLabClient", () => {
     await expect(
       client.createDiscussion(mr, { body: "x", position: { path: "a.ts", oldLine: null, newLine: 999 } })
     ).rejects.toBeInstanceOf(PositionRejectedError);
+
+    // Both lines null: a comment on the file as a whole.
+    await client.createDiscussion(mr, { body: "file", position: { path: "a.ts", oldLine: null, newLine: null } });
+    expect((posted[2] as { position: unknown }).position).toEqual({
+      position_type: "file",
+      base_sha: "b".repeat(40),
+      start_sha: "s".repeat(40),
+      head_sha: "h".repeat(40),
+      old_path: "a.ts",
+      new_path: "a.ts",
+    });
   });
 
   it("approves at the head commit", async () => {
@@ -446,6 +457,8 @@ describe("ReviewMergeRequestUseCase", () => {
     expect(r.fallback).toBe(true);
     expect(created).toEqual([{ body: quoteLine(position, "new SessionStore(db)", "Needs the ttl") }]);
     expect(quoteLine(position, "x", "y")).toBe("**`src/app.ts:12`**\n```\nx\n```\n\ny");
+    // A comment on a whole file names the file only.
+    expect(quoteLine({ path: "src/app.ts", oldLine: null, newLine: null }, "", "y")).toBe("**`src/app.ts`**\n\ny");
   });
 });
 

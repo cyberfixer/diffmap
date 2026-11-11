@@ -5,6 +5,7 @@ import type { AnalysisResult } from "../../domain/analysis-result.js";
 import type { FileView } from "../../domain/file-view.js";
 import type { CallSite, GraphNode } from "../../domain/graph.js";
 import type { DiffLine } from "../../domain/symbol.js";
+import { intralineMarks, type CharRange } from "../../application/intraline.js";
 import { STYLE } from "./html-style.js";
 import { CLIENT_SCRIPT } from "./html-client.js";
 import { THEME_BOOT, THEME_BUTTON } from "./theme.js";
@@ -145,21 +146,81 @@ const COPY_ICON = `<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="
 const copyButton = (file: string): string =>
   `<button class="cbtn copy" type="button" data-path="${esc(file)}" title="Copy path" aria-label="Copy path ${esc(file)}">${COPY_ICON}<span class="copy-label">Copy</span></button>`;
 
-const pathHtml = (file: string): string => {
-  const { dir, base } = splitPath(file);
-  return `<span class="fpath" title="${esc(file)}"><span class="fdir">${esc(dir)}</span><span class="fname">${esc(base)}</span></span>`;
+// ── right-to-left text (Arabic, Hebrew, …) ──
+const RTL_CHAR = "\\u0590-\\u08FF\\uFB1D-\\uFDFF\\uFE70-\\uFEFC";
+const HAS_RTL = new RegExp(`[${RTL_CHAR}]`);
+/** A run of right-to-left words: letters, with only spaces and digits between them. */
+const RTL_RUN = new RegExp(`[${RTL_CHAR}](?:[\\s\\d]*[${RTL_CHAR}])*`, "g");
+/** The first letter that has a direction; right-to-left when it is Arabic or Hebrew. */
+const FIRST_STRONG = new RegExp(`[A-Za-z\\u00C0-\\u024F\\u0370-\\u03FF\\u0400-\\u04FF${RTL_CHAR}]`);
+
+/**
+ * Escaped text for a line that reads left to right, like code. Each right-to-left
+ * run is isolated (<bdi>), so it reads correctly and the browser does not move the
+ * quotes, numbers and operators around it to the other side.
+ */
+const bidiHtml = (text: string): string => {
+  const html = esc(text);
+  return HAS_RTL.test(text) ? html.replace(RTL_RUN, "<bdi>$&</bdi>") : html;
 };
 
-const tokensHtml = (text: string, tokens?: HighlightToken[]): string =>
-  tokens
-    ? tokens
-        .map((t) =>
-          t.kind === "plain"
-            ? esc(expandTabs(t.text))
-            : `<span class="tk-${t.kind}">${esc(expandTabs(t.text))}</span>`
-        )
-        .join("")
-    : esc(expandTabs(text));
+/** Whether a line of plain text (not code) should be laid out right to left: its first letter is. */
+export const startsRtl = (text: string): boolean => {
+  if (!HAS_RTL.test(text)) return false;
+  const first = text.match(FIRST_STRONG);
+  return !!first && HAS_RTL.test(first[0]);
+};
+
+const pathHtml = (file: string): string => {
+  const { dir, base } = splitPath(file);
+  // Right-to-left folder names keep their order: a left-to-right mark after each slash.
+  const dirHtml = HAS_RTL.test(dir) ? esc(dir).replace(/\//g, "/&lrm;") : esc(dir);
+  return `<span class="fpath" title="${esc(file)}"><span class="fdir">${dirHtml}</span><span class="fname">${bidiHtml(base)}</span></span>`;
+};
+
+/**
+ * A stretch of a line's text as HTML. `marks` are the characters (counted from the
+ * start of the line; this stretch starts at `at`) that an edit changed: they get
+ * a stronger shade of the line's green or red.
+ */
+const piecesHtml = (text: string, at: number, marks: CharRange[] | undefined, html: (s: string) => string): string => {
+  if (!marks?.length) return html(expandTabs(text));
+  let out = "";
+  let pos = 0;
+  for (const [from, to] of marks) {
+    const a = Math.max(from - at, pos);
+    const b = Math.min(to - at, text.length);
+    if (a >= b) continue;
+    out += `${html(expandTabs(text.slice(pos, a)))}<span class="chg">${html(expandTabs(text.slice(a, b)))}</span>`;
+    pos = b;
+  }
+  return out + html(expandTabs(text.slice(pos)));
+};
+
+const tokensHtml = (text: string, tokens?: HighlightToken[], marks?: CharRange[]): string => {
+  // Marks count characters of the line; they only fit the tokens when those spell the same line.
+  if (!tokens || (marks?.length && tokens.reduce((n, t) => n + t.text.length, 0) !== text.length)) {
+    return piecesHtml(text, 0, marks, bidiHtml);
+  }
+  let at = 0;
+  return tokens
+    .map((t) => {
+      const html = piecesHtml(t.text, at, marks, bidiHtml);
+      at += t.text.length;
+      return t.kind === "plain" ? html : `<span class="tk-${t.kind}">${html}</span>`;
+    })
+    .join("");
+};
+
+/**
+ * The text cell of a code row. In a file that is plain text (no highlighter: Markdown,
+ * translations, …) a line that starts with Arabic or Hebrew is laid out right to left
+ * as a whole. Code always stays left to right, with its right-to-left runs isolated.
+ */
+const textCell = (text: string, tokens?: HighlightToken[], prose = false, marks?: CharRange[]): string =>
+  prose && startsRtl(text)
+    ? `<span class="tx" dir="rtl">${piecesHtml(text, 0, marks, esc)}</span>`
+    : `<span class="tx">${tokensHtml(text, tokens, marks)}</span>`;
 
 /**
  * Colour a file view. Added lines come from the new file and removed lines from
@@ -317,6 +378,8 @@ export function renderHtml(
     .map((view, fi) => {
       const hl = hlFor(view.path);
       const tokens = hl ? highlightView(view, hl) : null;
+      // On an edited line, the letters that changed.
+      const marks = intralineMarks(view.lines);
       const defsAt = new Map<number, number[]>();
       for (const k of symsByFile.get(view.path) ?? []) {
         const r = rowFor(view.lines, changed[k]);
@@ -352,12 +415,16 @@ export function renderHtml(
           : "";
         const sign = l.type === "add" ? "+" : l.type === "del" ? "−" : "";
         rows.push(
-          `<div class="${cls}"${id}${def}><span class="lo">${l.oldLine ?? ""}</span><span class="ln">${l.newLine ?? ""}</span><span class="sg">${sign}</span><span class="tx">${tokensHtml(l.text, tokens?.[i])}</span></div>`
+          `<div class="${cls}"${id}${def}><span class="lo">${l.oldLine ?? ""}</span><span class="ln">${l.newLine ?? ""}</span><span class="sg">${sign}</span>${textCell(l.text, tokens?.[i], !hl, marks.get(i))}</div>`
         );
       });
 
       const expand = folded
         ? `<button class="cbtn expand" type="button" aria-pressed="false" title="Show the whole file">Whole file</button>`
+        : "";
+      // On the service: a comment on the file as a whole, next to its name.
+      const fileComment = mrPage && !mrPage.readOnly
+        ? `<button class="cbtn fcomment" type="button" title="Comment on this file as a whole">Comment</button>`
         : "";
       const large = isLargeFile(view, options);
       const total = view.lines.filter((l) => l.type !== "del").length || view.lines.length;
@@ -365,7 +432,7 @@ export function renderHtml(
         ? `<button class="bigbar" type="button">${total.toLocaleString("en-US")} lines · hidden because the file is large · <b>Show</b></button>`
         : "";
       return `<section class="fsec${large ? " big" : ""}" id="c${fi}" data-path="${esc(view.path)}" data-rev="${changeVersion(view)}">
-  <header class="fh"><button class="fold" type="button" aria-expanded="true" title="Collapse or open this file" aria-label="Collapse or open ${esc(view.path)}"><span class="chev" aria-hidden="true"></span></button>${pathHtml(view.path)}${copyButton(view.path)}${expand}<span class="cmeta"><span class="add">+${add}</span><span class="del">−${del}</span></span><label class="vf" title="Mark this file as viewed and collapse it"><input type="checkbox" class="fv"> Viewed</label></header>
+  <header class="fh"><button class="fold" type="button" aria-expanded="true" title="Collapse or open this file" aria-label="Collapse or open ${esc(view.path)}"><span class="chev" aria-hidden="true"></span></button>${pathHtml(view.path)}${copyButton(view.path)}${fileComment}${expand}<span class="cmeta"><span class="add">+${add}</span><span class="del">−${del}</span></span><label class="vf" title="Mark this file as viewed and collapse it"><input type="checkbox" class="fv"> Viewed</label></header>
   ${bigBar}<div class="code">${rows.join("")}</div>
 </section>`;
     })
@@ -381,7 +448,7 @@ export function renderHtml(
       const rows = code
         .map((text, i) => {
           const n = c.line + i;
-          return `<div class="dl ctx" id="U${ci}-${n}"><span class="lo">${n}</span><span class="ln">${n}</span><span class="sg"></span><span class="tx">${tokensHtml(text, tokens?.[i])}</span></div>`;
+          return `<div class="dl ctx" id="U${ci}-${n}"><span class="lo">${n}</span><span class="ln">${n}</span><span class="sg"></span>${textCell(text, tokens?.[i], !hl)}</div>`;
         })
         .join("");
       return `<div class="caller code" data-path="${esc(c.file)}">${rows || `<div class="deco" id="U${ci}-${c.line}">${esc(c.name)}</div>`}</div>`;
@@ -460,7 +527,7 @@ export function renderHtml(
 <body class="${mrPage ? "mr" : ""}${mrPage && !mrPage.readOnly ? " mr-write" : ""}">
 <header class="top">
   <div class="brand"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2.5"></circle><circle cx="19" cy="6" r="2.5"></circle><circle cx="12" cy="18" r="2.5"></circle><path d="M7.5 6h9M6.5 8.2l4.2 7.6M17.5 8.2l-4.2 7.6"></path></svg><span>diffmap</span></div>
-  <div class="title"><div class="t">${mrPage ? `<a href="${esc(mrPage.mr.webUrl)}" title="Open in ${esc(mrPage.hostName ?? "GitLab")}">${esc(title)}</a>` : esc(title)}</div><div class="s mono">${esc(sub)}</div></div>
+  <div class="title"><div class="t">${mrPage ? `<a href="${esc(mrPage.mr.webUrl)}" title="Open in ${esc(mrPage.hostName ?? "GitLab")}">${esc(`${mrPage.refPrefix ?? "!"}${mrPage.mr.iid}`)} · <bdi>${esc(mrPage.mr.title)}</bdi></a>` : `<bdi>${esc(title)}</bdi>`}</div><div class="s mono">${esc(sub)}</div></div>
   <div class="acts">
     ${warnPill}
     ${mrPage ? mrActions(mrPage) : ""}

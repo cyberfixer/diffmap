@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { changeVersion, folderTree, renderHtml } from "../src/interfaces/html/render-html.js";
+import { changeVersion, folderTree, renderHtml, startsRtl } from "../src/interfaces/html/render-html.js";
 import type { AnalysisResult } from "../src/domain/analysis-result.js";
 import type { GraphNode } from "../src/domain/graph.js";
 import type { DiffLine } from "../src/domain/symbol.js";
@@ -81,7 +81,7 @@ describe("renderHtml", () => {
 
   it("shows branch names, commit count and title in the top bar, with no approve buttons", () => {
     const html = renderHtml(result);
-    expect(html).toContain('<div class="t">Guard task updates</div>');
+    expect(html).toContain('<div class="t"><bdi>Guard task updates</bdi></div>');
     expect(html).toContain("feature/tasks → main · 2 commits");
     expect(html).not.toMatch(/Approve|Request changes/);
   });
@@ -110,6 +110,10 @@ describe("renderHtml", () => {
   it("colours file names by what happened to them", () => {
     const html = renderHtml(result);
     expect(html).toMatch(/class="sf-file mono fs-modified"/);
+  });
+
+  it("has no file comment button in a report file (comments need the service)", () => {
+    expect(renderHtml(result)).not.toContain('class="cbtn fcomment"');
   });
 
   it("tracks 'viewed' per file, not 'approved'", () => {
@@ -219,6 +223,44 @@ describe("renderHtml", () => {
     const clean = renderHtml({ ...result, edges: result.edges.filter((e) => e.kind !== "calls-removed") });
     expect(clean).not.toContain('id="tabb"');
     expect(clean).not.toContain('id="brokenpill"');
+  });
+
+  it("keeps right-to-left text readable: isolated in code, whole lines in plain text", () => {
+    const line = (text: string, n: number) => row("add", n, text);
+    const files = [
+      { path: "docs/عربي/دليل.md", status: "added" as const, lines: [line("# مرحبا بالعالم", 1), line("Mixed: كلمة عربية here", 2), line("plain", 3)] },
+      { path: "a.ts", status: "added" as const, lines: [line('const m = "مرحبا" + 5; // تعليق عربي', 1)] },
+    ];
+    const ts = {
+      supportedExtensions: [".ts"],
+      highlight: (_f: string, lines: string[]) => lines.map((t) => [{ kind: "plain" as const, text: t }]),
+    };
+    const html = renderHtml({ ...result, symbols: [], nodes: [], edges: [], files }, [ts as never]);
+    // Plain text: a line that starts with Arabic is laid out right to left as a whole.
+    expect(html).toContain('<span class="tx" dir="rtl"># مرحبا بالعالم</span>');
+    expect(html).toContain('<span class="tx">Mixed: <bdi>كلمة عربية</bdi> here</span>');
+    expect(html).toContain('<span class="tx">plain</span>');
+    // Code stays left to right; each Arabic run is isolated so "+ 5" stays where it is.
+    expect(html).toContain('const m = &quot;<bdi>مرحبا</bdi>&quot; + 5; // <bdi>تعليق عربي</bdi>');
+    // Folder names keep their order in the path.
+    expect(html).toContain('<span class="fdir">docs/&lrm;عربي/&lrm;</span><span class="fname"><bdi>دليل</bdi>.md</span>');
+    expect(startsRtl("- البند الأول")).toBe(true);
+    expect(startsRtl("key: قيمة")).toBe(false);
+    expect(startsRtl("123 + 4")).toBe(false);
+  });
+
+  it("shades the letters that changed on an edited line", () => {
+    const files = [{
+      path: "a.txt",
+      status: "modified" as const,
+      lines: [row("del", 1, "\tlimit = 10 # مرحبا"), row("add", 1, "\tlimit = 100 # مرحبا"), row("add", 2, "something else entirely")],
+    }];
+    const html = renderHtml({ ...result, symbols: [], nodes: [], edges: [], files });
+    expect(html).toContain('<span class="tx">  limit = 10 # <bdi>مرحبا</bdi></span>');
+    expect(html).toContain('<span class="tx">  limit = 10<span class="chg">0</span> # <bdi>مرحبا</bdi></span>');
+    expect(html).toContain('<span class="tx">something else entirely</span>');
+    expect(html).toContain(".dl.add .chg { background:var(--add-hl);");
+    expect(html).toContain(".dl.del .chg { background:var(--del-hl);");
   });
 
   it("has back and forward, and keeps the definition apart from the usages", () => {

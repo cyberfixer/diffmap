@@ -22,8 +22,9 @@ interface GhReviewComment {
   user: GhUser;
   created_at: string;
   path: string;
-  line: number | null; // null when the comment is outdated
+  line: number | null; // null when the comment is outdated, or sits on the file as a whole
   side?: "LEFT" | "RIGHT";
+  subject_type?: "line" | "file";
   in_reply_to_id?: number;
 }
 interface GhIssueComment { id: number; body: string; user: GhUser; created_at: string }
@@ -152,9 +153,11 @@ export class GitHubClient implements MergeRequestHostPort {
         id: `rc-${c.id}`,
         resolved: false, // the REST API does not say; resolved threads still show
         position:
-          c.line === null
-            ? null // outdated: the line no longer exists
-            : { path: c.path, oldLine: c.side === "LEFT" ? c.line : null, newLine: c.side === "LEFT" ? null : c.line },
+          c.subject_type === "file"
+            ? { path: c.path, oldLine: null, newLine: null } // on the file as a whole
+            : c.line === null
+              ? null // outdated: the line no longer exists
+              : { path: c.path, oldLine: c.side === "LEFT" ? c.line : null, newLine: c.side === "LEFT" ? null : c.line },
         notes: [note(c)],
       });
     }
@@ -173,8 +176,9 @@ export class GitHubClient implements MergeRequestHostPort {
           body: comment.body,
           commit_id: mr.diffRefs.headSha,
           path: p.path,
-          line: p.newLine ?? p.oldLine,
-          side: p.newLine !== null ? "RIGHT" : "LEFT",
+          ...(p.newLine === null && p.oldLine === null
+            ? { subject_type: "file" } // on the file as a whole
+            : { line: p.newLine ?? p.oldLine, side: p.newLine !== null ? "RIGHT" : "LEFT" }),
         });
         return {
           id: `rc-${c.id}`,
@@ -183,7 +187,7 @@ export class GitHubClient implements MergeRequestHostPort {
           notes: [{ id: c.id, author: person(c.user), body: c.body, createdAt: c.created_at }],
         };
       } catch (err) {
-        // 422: the line is not part of the pull request's diff.
+        // 422: the line (or file) is not part of the pull request's diff.
         if (err instanceof HostError && err.status === 422) throw new PositionRejectedError(err.message);
         throw err;
       }

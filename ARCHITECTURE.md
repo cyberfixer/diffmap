@@ -196,7 +196,14 @@ flowchart LR
   drag applies them once per frame. Measured on a made-up change of 400 files ×
   300 lines: one resize step went from about 960 ms to one frame.
 - **[html-client-mr.ts](src/interfaces/html/html-client-mr.ts)** is added only on
-  the service: comment threads under their lines, the comment box, Approve.
+  the service: comment threads under their lines, comments on a whole file under
+  its name (a position with no line), the comment box, Approve.
+- **Changed letters:** [intraline.ts](src/application/intraline.ts) pairs each
+  removed line with the added line that replaced it and finds the characters
+  that differ; render-html.ts wraps them in `<span class="chg">`.
+- **Right-to-left text:** `bidiHtml` in render-html.ts wraps each Arabic or Hebrew
+  run of a code line in `<bdi>`; in files without a highlighter, a line whose
+  first letter is right-to-left gets `dir="rtl"`.
 
 ---
 

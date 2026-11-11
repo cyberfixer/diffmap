@@ -25,7 +25,10 @@ export interface MergeRequestInfo {
   gitUser: string;
 }
 
-/** Where a comment sits in the diff. Exactly one of the lines may be null. */
+/**
+ * Where a comment sits in the diff: on a line (one of the two lines may be null),
+ * or on the file as a whole (both lines null).
+ */
 export interface LinePosition {
   path: string;
   oldLine: number | null; // line in the old file (removed or unchanged lines)
@@ -57,7 +60,7 @@ export interface NewComment {
   position?: LinePosition; // omit for a general MR comment
 }
 
-/** Raised when the host refuses a line comment (e.g. the line is not part of the diff). */
+/** Raised when the host refuses a line or file comment (e.g. the line is not part of the diff). */
 export class PositionRejectedError extends Error {}
 
 /** Raised for a failed call to the host; `status` is the HTTP status. */

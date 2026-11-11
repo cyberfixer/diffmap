@@ -79,15 +79,16 @@ describe("renderHtml with a highlighter", () => {
     const html = renderHtml(result, [hl]);
 
     expect(html).toContain('<span class="tk-keyword">return</span>');
-    expect(html).toContain(`<span class="tk-string">'x'</span>`);
+    // The edited part of the line is shaded inside its colour.
+    expect(html).toContain(`<span class="tk-string"><span class="chg">'x'</span></span>`);
     expect(html).toContain("a &lt; b");
     expect(html).not.toContain("a < b");
   });
 
   it("tokenizes old and new versions separately, so a comment opened on an unchanged line spans both", () => {
     const html = renderHtml(result, [hl]);
-    expect(html).toContain('<span class="tk-comment">   still old comment */</span>');
-    expect(html).toContain('<span class="tk-comment">   still new comment */</span>');
+    expect(html).toContain('<span class="tk-comment">   still <span class="chg">old</span> comment */</span>');
+    expect(html).toContain('<span class="tk-comment">   still <span class="chg">new</span> comment */</span>');
   });
 
   it("falls back to plain text without a highlighter", () => {

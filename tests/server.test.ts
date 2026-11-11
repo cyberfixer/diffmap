@@ -174,6 +174,7 @@ describe("diffmap service", () => {
     expect(r.status).toBe(200);
     expect(html).toContain("!42 · Trim emails on login");
     expect(html).toContain("Sara K · feature/creds → main · 1 commit");
+    expect(html).toContain('<button class="cbtn fcomment" type="button" title="Comment on this file as a whole">Comment</button>');
     expect(html).toContain('id="approve"');
     expect(html).toContain("Click a line number to comment on that line");
     expect(html).toContain(">Approve</button>");
@@ -205,6 +206,12 @@ describe("diffmap service", () => {
     expect((await b.json()).fallback).toBe(true);
     expect(posted.at(-1)!.body).toContain("`src/checkout.ts:3`");
     expect(posted.at(-1)!.position).toBeUndefined();
+
+    // A comment on a file as a whole: a position with no line.
+    const f = await postJson(`${api}/discussions`, cookie, { body: "Split this file", position: { path: "src/auth.ts", oldLine: null, newLine: null } });
+    expect(f.status).toBe(201);
+    expect(posted.at(-1)!.position).toEqual({ path: "src/auth.ts", oldLine: null, newLine: null });
+    expect((await postJson(`${api}/discussions`, cookie, { body: "x", position: { path: "src/auth.ts", oldLine: 0, newLine: null } })).status).toBe(400);
 
     const c = await postJson(`${api}/discussions/d1/notes`, cookie, { body: "Because of pasted emails" });
     expect((await c.json()).body).toBe("Because of pasted emails");

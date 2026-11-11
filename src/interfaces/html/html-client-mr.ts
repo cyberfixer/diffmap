@@ -1,7 +1,8 @@
 /**
  * Browser script added only when the page shows a merge/pull request from the service:
- * shows existing comment threads on their lines, lets the reviewer comment on
- * any line (click its line number) or reply, and approve. Talks to the diffmap
+ * shows existing comment threads on their lines and files, lets the reviewer comment on
+ * any line (click its line number) or on a file as a whole (Comment, by its name),
+ * reply, and approve. Talks to the diffmap
  * server, which calls the code host (GitLab or GitHub) as the signed-in user.
  * Kept free of template-literal syntax so it can live in a TS string.
  */
@@ -47,9 +48,16 @@ export const MR_CLIENT_SCRIPT = `
   // ── find code rows ──
   var cardByPath = {};
   qa('.fsec').forEach(function (c) { cardByPath[c.dataset.path] = c; });
+  /** Where the comments on a file as a whole go: under its name, above its code. */
+  function fileBox(card) {
+    var box = card.querySelector('.fcs');
+    if (!box) { box = h('div', 'fcs'); card.insertBefore(box, card.querySelector('.fh').nextSibling); }
+    return box;
+  }
+  function onFile(p) { return p.oldLine === null && p.newLine === null; }
   function rowFor(p) {
     var card = cardByPath[p.path];
-    if (!card) return null;
+    if (!card || onFile(p)) return null;
     var rows = qa('.dl', card);
     for (var i = 0; i < rows.length; i++) {
       var r = rows[i], o = r.querySelector('.lo').textContent, n = r.querySelector('.ln').textContent;
@@ -82,7 +90,9 @@ export const MR_CLIENT_SCRIPT = `
     hd.appendChild(h('b', '', n.author.name));
     hd.appendChild(document.createTextNode(' @' + n.author.username + ' · ' + when(n.createdAt)));
     d.appendChild(hd);
-    d.appendChild(h('div', 'nb', n.body));
+    var body = h('div', 'nb', n.body);
+    body.dir = 'auto'; // Arabic and Hebrew comments read right to left
+    d.appendChild(body);
     return d;
   }
   function threadEl(d) {
@@ -113,6 +123,7 @@ export const MR_CLIENT_SCRIPT = `
     var ta = h('textarea');
     ta.placeholder = 'Write a comment… (Markdown, Ctrl+Enter to send)';
     ta.setAttribute('aria-label', 'Comment');
+    ta.dir = 'auto';
     c.appendChild(ta);
     if (opts.hint) c.appendChild(h('div', 'hint', opts.hint));
     var row = h('div', 'row');
@@ -156,31 +167,36 @@ export const MR_CLIENT_SCRIPT = `
   if (M.readOnly) how.textContent = 'This diffmap is view-only. To comment, open the review in ' + M.hostName + '.';
   else {
     how.appendChild(h('span', 'plus', '+'));
-    how.appendChild(document.createTextNode('To comment on a line, point at it in the code and click the blue + or its line number. Click Reply under a thread to answer it.'));
+    how.appendChild(document.createTextNode('To comment on a line, point at it in the code and click the blue + or its line number. To comment on a whole file, click Comment next to its name. Click Reply under a thread to answer it.'));
   }
   pane.appendChild(how);
   var onLines = h('div');
   pane.appendChild(onLines);
-  /** One line per thread that sits on a code line, in file order. */
+  /** One line per thread that sits on a file or on a code line, in file order. */
   function indexThreads() {
     onLines.textContent = '';
-    var rows = qa('.fsec .dl.has-c');
-    onLines.hidden = !rows.length;
-    if (!rows.length) return;
-    onLines.appendChild(h('h3', '', 'On lines'));
-    rows.forEach(function (row) {
-      var info = lineInfo(row), t = row.nextElementSibling;
-      for (; t && (t.classList.contains('thread') || t.classList.contains('composer')); t = t.nextElementSibling) {
-        var first = t.querySelector('.note');
-        if (!first) continue;
-        var b = h('button', 'ref' + (t.classList.contains('resolved') ? ' resolved' : ''));
-        b.type = 'button';
-        b.appendChild(h('span', 'rn', info.path + ':' + (info.newLine !== null ? info.newLine : info.oldLine)));
-        b.appendChild(h('span', 'rt', first.querySelector('.nh b').textContent + ': ' + first.querySelector('.nb').textContent));
-        b.addEventListener('click', (function (r) { return function () { G.reveal(r); }; })(row));
-        onLines.appendChild(b);
-      }
+    var n = 0;
+    function entry(t, where, target) {
+      var first = t.querySelector('.note');
+      if (!first) return;
+      if (!n++) onLines.appendChild(h('h3', '', 'On files and lines'));
+      var b = h('button', 'ref' + (t.classList.contains('resolved') ? ' resolved' : ''));
+      b.type = 'button';
+      b.appendChild(h('span', 'rn', where));
+      b.appendChild(h('span', 'rt', first.querySelector('.nh b').textContent + ': ' + first.querySelector('.nb').textContent));
+      b.addEventListener('click', function () { G.setShut(target.closest('.fsec'), false); G.reveal(target); });
+      onLines.appendChild(b);
+    }
+    qa('.fsec').forEach(function (card) {
+      qa('.fcs .thread', card).forEach(function (t) { entry(t, G.lp(card.dataset.path), card); });
+      qa('.dl.has-c', card).forEach(function (row) {
+        var info = lineInfo(row), t = row.nextElementSibling;
+        for (; t && (t.classList.contains('thread') || t.classList.contains('composer')); t = t.nextElementSibling) {
+          entry(t, G.lp(info.path) + ':' + (info.newLine !== null ? info.newLine : info.oldLine), row);
+        }
+      });
     });
+    onLines.hidden = !n;
   }
   var gen = h('div');
   gen.appendChild(h('h3', '', 'On the whole ' + (M.hostName === 'GitHub' ? 'pull request' : 'merge request')));
@@ -203,7 +219,9 @@ export const MR_CLIENT_SCRIPT = `
   // ── place existing threads ──
   M.discussions.forEach(function (d) {
     var row = d.position ? rowFor(d.position) : null;
+    var card = d.position && onFile(d.position) ? cardByPath[d.position.path] : null;
     if (row) { insertAfterRow(row, threadEl(d)); row.classList.add('has-c'); }
+    else if (card) fileBox(card).appendChild(threadEl(d));
     else genList.appendChild(threadEl(d));
   });
   indexThreads();
@@ -245,6 +263,30 @@ export const MR_CLIENT_SCRIPT = `
     insertAfterRow(row, c);
     c.querySelector('textarea').focus();
   }, true);
+
+  // ── "Comment" next to a file's name: a comment on the file as a whole ──
+  if (!M.readOnly) document.addEventListener('click', function (e) {
+    var b = e.target.closest('.fcomment');
+    if (!b) return;
+    var card = b.closest('.fsec'), box = fileBox(card);
+    G.setShut(card, false);
+    qa('.composer.new').forEach(function (c) { c.remove(); });
+    var c = composer({
+      hint: 'A comment on ' + card.dataset.path + ' as a whole.',
+      submit: function (body) {
+        return post('/discussions', { body: body, position: { path: card.dataset.path, oldLine: null, newLine: null } });
+      },
+      done: function (r) {
+        c.replaceWith(threadEl(r.discussion));
+        bump();
+        if (r.fallback) toast(M.hostName + " can't attach a comment to a file here, so it was posted as a general comment that names the file.");
+      },
+      cancel: function () { c.remove(); }
+    });
+    c.classList.add('new');
+    box.appendChild(c);
+    c.querySelector('textarea').focus();
+  });
 
   // ── approve ──
   var ab = byId('approve');

@@ -8,6 +8,12 @@
 
 ## Done
 
+### 25. File comments, right-to-left text, changed letters, collapse without losing your place — DONE
+- "Comment" next to a file's name: a comment on the file as a whole (GitHub `subject_type: file`, GitLab `position_type: file`, with a general comment naming the file as the fallback). Shown under the file name and in the Comments tab.
+- Arabic and Hebrew: runs inside code are isolated so they read correctly and don't move the code around them; in plain-text files a line that starts right-to-left is laid out right to left; comments and titles follow their text.
+- Edited lines: the letters that changed are shaded stronger (word by word, then letter by letter inside a changed word; Arabic words stay whole). Lines with too little in common are left plain.
+- Fix: ticking Viewed (or collapsing) from deep inside a long file no longer skips the files after it; the code stays on the collapsed file's header.
+
 ### 24. Review screen: quick on big changes, definition above / usages below — DONE
 - Big merge requests: files and list entries off screen are not laid out (`content-visibility`); dividers are 12px to grab and apply once per frame. On a made-up 400-file change a resize step went from about 960 ms to one frame, selecting a symbol from about 190 ms to under 35 ms.
 - The code column goes to the definition and stays there; the panel shows usages only, with the code around the one picked. "Show in the code above" takes the code to a usage.

@@ -185,8 +185,9 @@ export class ReviewMergeRequestUseCase {
   }
 
   /**
-   * Post a comment. A line GitLab cannot attach a diff comment to (for example a
-   * caller in a file outside the diff) becomes a general comment that quotes it.
+   * Post a comment. A line the host cannot attach a diff comment to (for example a
+   * caller in a file outside the diff) becomes a general comment that quotes it;
+   * the same for a comment on a whole file where the host has no such thing.
    */
   async comment(
     host: MergeRequestHostPort,
@@ -212,9 +213,10 @@ export class ReviewMergeRequestUseCase {
   }
 }
 
-/** A general comment that points at a file and line. */
+/** A general comment that points at a file and line (or just the file, for a comment on the whole file). */
 export function quoteLine(p: LinePosition, code: string, body: string): string {
   const line = p.newLine ?? p.oldLine;
+  if (line === null) return `**\`${p.path}\`**\n\n${body}`;
   const fence = code.includes("```") ? "~~~" : "```";
   return `**\`${p.path}:${line}\`**\n${fence}\n${code}\n${fence}\n\n${body}`;
 }
