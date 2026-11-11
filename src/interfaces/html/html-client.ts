@@ -520,18 +520,25 @@ export const CLIENT_SCRIPT = `
   // ── viewed files ──
   // On the service the marks are saved on the server, per user; in a standalone
   // report they stay in this browser. A viewed file is collapsed.
+  // A mark is saved with the version of the file's change (data-rev) and only
+  // counts while the change still has that version: a later push that changes
+  // the file again clears it.
   function fileId(sec) { return 'file:' + sec.dataset.path; }
   function loadViewed() {
-    if (D.mr) return D.mr.viewed.reduce(function (o, id) { o[id] = true; return o; }, {});
+    if (D.mr) return D.mr.viewed;
+    // A report file is one fixed change, so its marks need no version.
     try { return JSON.parse(localStorage.getItem(D.key) || '[]').reduce(function (o, id) { o[id] = true; return o; }, {}); }
     catch (err) { return {}; }
   }
-  function saveViewed(id, on) {
+  function isViewed(sec) { var v = viewed[fileId(sec)]; return v === true || v === sec.dataset.rev; }
+  // Marked as viewed before, but the file has changed since.
+  function isStale(sec) { var v = viewed[fileId(sec)]; return typeof v === 'string' && v !== '' && v !== sec.dataset.rev; }
+  function saveViewed(sec, on) {
     if (D.mr) {
       return fetch(D.mr.apiBase + '/viewed', {
         method: 'POST', credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbolId: id, viewed: on })
+        body: JSON.stringify({ id: fileId(sec), rev: sec.dataset.rev, viewed: on })
       }).then(function (r) { if (!r.ok) throw new Error('save failed'); });
     }
     try { localStorage.setItem(D.key, JSON.stringify(Object.keys(viewed))); } catch (err) { /* private mode */ }
@@ -540,28 +547,36 @@ export const CLIENT_SCRIPT = `
   function updateViewed() {
     var n = 0;
     files.forEach(function (sec) {
-      var on = !!viewed[fileId(sec)];
+      var on = isViewed(sec), stale = isStale(sec);
       if (on) n++;
       sec.classList.toggle('seen', on);
+      sec.classList.toggle('stale', stale);
       sec.querySelector('.fv').checked = on;
       var b = document.querySelector('.sf-file[data-card="' + sec.id + '"]');
-      if (b) { b.classList.toggle('seen', on); b.querySelector('.vw').textContent = on ? '✓' : ''; }
+      if (b) {
+        b.classList.toggle('seen', on);
+        b.classList.toggle('stale', stale);
+        b.querySelector('.vw').textContent = on ? '✓' : stale ? '●' : '';
+        b.querySelector('.vw').title = stale ? 'Changed since you viewed it' : '';
+      }
     });
     byId('vcount').textContent = n;
     byId('vbar').style.width = (files.length ? Math.round(n / files.length * 100) : 0) + '%';
   }
   function setViewed(sec, on) {
-    if (on) viewed[fileId(sec)] = true; else delete viewed[fileId(sec)];
+    if (on) viewed[fileId(sec)] = D.mr ? sec.dataset.rev : true; else delete viewed[fileId(sec)];
     setShut(sec, on);
     updateViewed();
   }
   ed.addEventListener('change', function (e) {
     if (!e.target.classList.contains('fv')) return;
-    var sec = e.target.closest('.fsec'), on = e.target.checked;
+    var sec = e.target.closest('.fsec'), on = e.target.checked, before = viewed[fileId(sec)];
     setViewed(sec, on);
-    saveViewed(fileId(sec), on).catch(function () {
+    saveViewed(sec, on).catch(function () {
       // Put it back and say so if the server could not save it.
-      setViewed(sec, !on);
+      if (before === undefined) delete viewed[fileId(sec)]; else viewed[fileId(sec)] = before;
+      setShut(sec, isViewed(sec));
+      updateViewed();
       var t = h('div', 'toast', 'Could not save "viewed" for ' + sec.dataset.path + '. Try again.');
       t.setAttribute('role', 'status');
       document.body.appendChild(t);
@@ -601,7 +616,7 @@ export const CLIENT_SCRIPT = `
   window.diffmap = { reveal: reveal, showTab: showTab };
 
   // Files already viewed start collapsed.
-  files.forEach(function (sec) { if (viewed[fileId(sec)]) setShut(sec, true); });
+  files.forEach(function (sec) { if (isViewed(sec)) setShut(sec, true); });
   updateViewed();
   renderDock();
 })();

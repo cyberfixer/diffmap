@@ -102,8 +102,16 @@ export interface RepoCachePort {
   prepare(mr: MergeRequestInfo, token: string, onProgress?: (p: Progress) => void): Promise<string>;
 }
 
-/** Remembers which changed symbols each user marked as viewed in a merge request. */
+/**
+ * What a user marked as viewed: id (e.g. "file:src/a.ts") -> the version of its
+ * change they saw. A mark only counts while the change still has that version,
+ * so a later push that changes the file again clears it.
+ */
+export type ViewedMarks = Record<string, string>;
+
+/** Remembers what each user marked as viewed in a merge request. */
 export interface ReviewProgressPort {
-  getViewed(user: string, projectPath: string, iid: number): Promise<string[]>;
-  setViewed(user: string, projectPath: string, iid: number, symbolId: string, viewed: boolean): Promise<string[]>;
+  getViewed(user: string, projectPath: string, iid: number): Promise<ViewedMarks>;
+  /** `version` is the version being marked as viewed, or null to remove the mark. */
+  setViewed(user: string, projectPath: string, iid: number, id: string, version: string | null): Promise<ViewedMarks>;
 }

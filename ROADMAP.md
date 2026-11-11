@@ -8,6 +8,9 @@
 
 ## Done
 
+### 16. "Viewed" resets when a file changes again — DONE
+- A "viewed" tick is saved with a fingerprint of the file's change (its added and removed lines). A later push that changes the file again clears the tick and marks the file "Changed since you viewed it"; a rebase that leaves the change as it was keeps it. Ticks saved before this are cleared once.
+
 ### 23. Review screen: editor-like navigation, less clutter — DONE
 - Sidebar is a folder tree (folders fold, single-child folders joined); file names coloured by added / modified / deleted; the map's cards follow the same order.
 - No arrows: the selected symbol's definition and usages are highlighted. Click a usage to go to the definition; click a definition to step through its usages.
@@ -85,9 +88,6 @@
 ### 4. `type` aliases are not symbols (rest of item 4)
 - Interfaces and enums are symbols now; TypeScript `type X = ...` still falls into `top-level`.
 
-### 16. "Viewed" resets when a function changes again
-- Today a function stays marked as viewed even if a later push changes it. GitLab resets its own "viewed" in that case; diffmap should too.
-
 ### 17. Clearer waiting and capacity
 - Show "waiting for N other merge requests" on the progress screen when all analysis slots are busy (today it already says "Analysing").
 - Default `ANALYSIS_WORKERS` to the number of CPU cores instead of 2.
@@ -113,4 +113,4 @@
 
 ## Suggested order
 
-Then the real tests above. Then 4 → 16 → 17, which make day-to-day reviews more accurate. 19, 7, 9 and 20 after that, in any order.
+Then the real tests above. Then 4 → 17, which make day-to-day reviews more accurate. 19, 7, 9 and 20 after that, in any order.

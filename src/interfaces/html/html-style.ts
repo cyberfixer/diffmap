@@ -95,7 +95,7 @@ export const STYLE = `
   .sf-file.fs-modified .p { color:var(--mod-fg); }
   .sf-file.fs-deleted .p { color:var(--del-fg); text-decoration:line-through; }
   .sf-file .n { flex:none; font-size:11px; }
-  .sf-file .vw { flex:none; width:12px; color:var(--accent); font-family:var(--sans); }
+  .sf-file .vw { flex:none; width:16px; text-align:center; color:var(--accent); font-family:var(--sans); font-size:15px; font-weight:700; line-height:1; }
   .sf-file.seen .p, .sf-file.seen .n { opacity:.55; }
   .sf-sym { padding-left:22px; color:var(--fg2); }
   .sf-sym .nm { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; }
@@ -129,8 +129,11 @@ export const STYLE = `
   .cbtn[aria-pressed="true"] { color:var(--fg); background:var(--hover); }
   .vf { flex:none; display:inline-flex; align-items:center; gap:5px; padding:3px 8px; border:1px solid var(--line-strong); border-radius:5px;
         background:var(--panel); color:var(--fg2); cursor:pointer; user-select:none; }
-  .vf input { margin:0; accent-color:var(--accent); }
+  .vf input { margin:0; width:15px; height:15px; accent-color:var(--accent); }
   .fsec.seen .vf { border-color:var(--accent); color:var(--accent); background:var(--accent-bg); }
+  .fsec.stale .vf { border-color:var(--mod-fg); }
+  .fsec.stale .vf::before { content:"Changed since you viewed it"; color:var(--mod-fg); margin-right:4px; }
+  .sf-file.stale .vw { color:var(--mod-fg); }
   .fsec.shut .code, .fsec.shut .bigbar, .fsec.shut .expand { display:none; }
   .fsec.big .code, .fsec.big .expand { display:none; }
   .fsec:not(.big) .bigbar { display:none; }

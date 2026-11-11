@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { extname } from "node:path";
 import type { SyntaxHighlighterPort, HighlightToken } from "../../application/ports/syntax-highlighter.port.js";
 import type { AnalysisResult } from "../../domain/analysis-result.js";
@@ -13,6 +14,7 @@ import type {
   MergeRequestInfo,
   Person,
   ReviewDiscussion,
+  ViewedMarks,
 } from "../../application/ports/merge-request.port.js";
 
 /** Extra data when the page shows a merge/pull request from the service. */
@@ -26,9 +28,23 @@ export interface MrPage {
   approvals: Approvals;
   user: Person;
   apiBase: string; // e.g. "/api/team/api/-/merge_requests/42"
-  viewed: string[]; // ids of symbols this user marked as viewed
+  viewed: ViewedMarks; // what this user marked as viewed, and which version of it
   /** Whether CI's exact index was used: found, still building, not set up. */
   indexState?: "found" | "pending" | "none" | "unsupported";
+}
+
+/**
+ * A short fingerprint of a file's change: its added and removed lines, in
+ * order. A "viewed" mark is saved with it, so the mark stops counting when a
+ * later push changes the file again. Unchanged lines and line numbers are left
+ * out, so a rebase that doesn't touch the change keeps the mark.
+ */
+export function changeVersion(view: FileView): string {
+  const hash = createHash("sha256").update(view.status);
+  for (const l of view.lines) {
+    if (l.type === "add" || l.type === "del") hash.update(`\n${l.type === "add" ? "+" : "-"}${l.text}`);
+  }
+  return hash.digest("hex").slice(0, 16);
 }
 
 export interface RenderOptions {
@@ -348,7 +364,7 @@ export function renderHtml(
       const bigBar = large
         ? `<button class="bigbar" type="button">${total.toLocaleString("en-US")} lines · hidden because the file is large · <b>Show</b></button>`
         : "";
-      return `<section class="fsec${large ? " big" : ""}" id="c${fi}" data-path="${esc(view.path)}">
+      return `<section class="fsec${large ? " big" : ""}" id="c${fi}" data-path="${esc(view.path)}" data-rev="${changeVersion(view)}">
   <header class="fh"><button class="fold" type="button" aria-expanded="true" title="Collapse or open this file" aria-label="Collapse or open ${esc(view.path)}"><span class="chev" aria-hidden="true"></span></button>${pathHtml(view.path)}${copyButton(view.path)}${expand}<span class="cmeta"><span class="add">+${add}</span><span class="del">−${del}</span></span><label class="vf" title="Mark this file as viewed and collapse it"><input type="checkbox" class="fv"> Viewed</label></header>
   ${bigBar}<div class="code">${rows.join("")}</div>
 </section>`;

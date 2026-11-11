@@ -1,9 +1,11 @@
-import type { ReviewProgressPort } from "../../application/ports/merge-request.port.js";
+import type { ReviewProgressPort, ViewedMarks } from "../../application/ports/merge-request.port.js";
 import { JsonFile } from "./json-file.js";
 
-type Data = Record<string, string[]>; // "<user>|<project>!<iid>" -> viewed symbol ids
+// "<user>|<project>!<iid>" -> { id: the version that was viewed }.
+// Files written before versions were kept hold a list of ids instead.
+type Data = Record<string, ViewedMarks | string[]>;
 
-/** Which symbols each user marked as viewed, per merge request, in one JSON file. */
+/** What each user marked as viewed, per merge request, in one JSON file. */
 export class FileViewedStore implements ReviewProgressPort {
   private file: JsonFile<Data>;
   private data: Data;
@@ -17,18 +19,26 @@ export class FileViewedStore implements ReviewProgressPort {
     return `${user}|${projectPath}!${iid}`;
   }
 
-  async getViewed(user: string, projectPath: string, iid: number): Promise<string[]> {
-    return this.data[this.key(user, projectPath, iid)] ?? [];
+  private marks(k: string): ViewedMarks {
+    const saved = this.data[k];
+    if (!saved) return {};
+    // Old marks have no version, so they match nothing and must be ticked again.
+    if (Array.isArray(saved)) return Object.fromEntries(saved.map((id) => [id, ""]));
+    return { ...saved };
   }
 
-  async setViewed(user: string, projectPath: string, iid: number, symbolId: string, viewed: boolean): Promise<string[]> {
+  async getViewed(user: string, projectPath: string, iid: number): Promise<ViewedMarks> {
+    return this.marks(this.key(user, projectPath, iid));
+  }
+
+  async setViewed(user: string, projectPath: string, iid: number, id: string, version: string | null): Promise<ViewedMarks> {
     const k = this.key(user, projectPath, iid);
-    const set = new Set(this.data[k] ?? []);
-    if (viewed) set.add(symbolId);
-    else set.delete(symbolId);
-    if (set.size) this.data[k] = [...set];
+    const marks = this.marks(k);
+    if (version === null) delete marks[id];
+    else marks[id] = version;
+    if (Object.keys(marks).length) this.data[k] = marks;
     else delete this.data[k];
     this.file.write(this.data);
-    return [...set];
+    return marks;
   }
 }

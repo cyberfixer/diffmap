@@ -238,7 +238,10 @@ In full mode you can also:
   the review, which GitHub only allows for people with write access.
 
 In both modes, the **Viewed** tick on each file tracks your progress. It is
-saved on the server for your user, so it stays after closing the browser.
+saved on the server for your user, so it stays after closing the browser. If a
+later push changes a file you already viewed, its tick is cleared and the file
+says "Changed since you viewed it" (an amber dot in the tree). A rebase that
+leaves the file's change as it was keeps the tick.
 
 Good to know:
 

@@ -240,13 +240,17 @@ describe("diffmap service", () => {
   it("remembers what each user marked as viewed", async () => {
     const cookie = await signIn();
     const api = "/api/team/api/-/merge_requests/42/viewed";
-    const r = await postJson(api, cookie, { symbolId: "src/auth.ts#login", viewed: true });
-    expect(await r.json()).toEqual({ viewed: ["src/auth.ts#login"] });
+    const r = await postJson(api, cookie, { id: "file:src/auth.ts", rev: "abc", viewed: true });
+    expect(await r.json()).toEqual({ viewed: { "file:src/auth.ts": "abc" } });
 
     // A new sign-in (another browser) sees the same marks.
     const { html } = await openMap(await signIn());
-    expect(html).toContain('"viewed":["src/auth.ts#login"]');
-    expect((await postJson(api, cookie, { symbolId: 5 })).status).toBe(400);
+    expect(html).toContain('"viewed":{"file:src/auth.ts":"abc"}');
+    expect((await postJson(api, cookie, { id: 5 })).status).toBe(400);
+    // A mark needs the version that was viewed; removing one does not.
+    expect((await postJson(api, cookie, { id: "file:src/auth.ts", viewed: true })).status).toBe(400);
+    const off = await postJson(api, cookie, { id: "file:src/auth.ts", viewed: false });
+    expect(await off.json()).toEqual({ viewed: {} });
   });
 
   it("signs out", async () => {

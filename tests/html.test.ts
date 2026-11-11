@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { folderTree, renderHtml } from "../src/interfaces/html/render-html.js";
+import { changeVersion, folderTree, renderHtml } from "../src/interfaces/html/render-html.js";
 import type { AnalysisResult } from "../src/domain/analysis-result.js";
 import type { GraphNode } from "../src/domain/graph.js";
 import type { DiffLine } from "../src/domain/symbol.js";
@@ -118,6 +118,26 @@ describe("renderHtml", () => {
     expect(html.match(/<input type="checkbox" class="fv">/g)).toHaveLength(1);
     expect(html).toContain("'file:' + sec.dataset.path");
     expect(pageData(html).key).toBe(`diffmap:viewed:${sha("a")}..${sha("b")}`);
+  });
+
+  it("gives each file's change a version, so 'viewed' can reset when it changes again", () => {
+    const file = result.files[0];
+    const rev = changeVersion(file);
+    expect(renderHtml(result)).toContain(`data-path="svc.ts" data-rev="${rev}"`);
+
+    // The same change after a rebase (other lines and line numbers moved): same version.
+    const moved = file.lines.map((l) => ({
+      ...l,
+      oldLine: l.oldLine && l.oldLine + 7,
+      newLine: l.newLine && l.newLine + 7,
+      text: l.type === "ctx" ? `${l.text} (rebased)` : l.text,
+    }));
+    expect(changeVersion({ ...file, lines: moved })).toBe(rev);
+
+    // A later push that changes the file again: a new version.
+    const again = file.lines.map((l) => (l.text === "  return 3;" ? { ...l, text: "  return 4;" } : l));
+    expect(changeVersion({ ...file, lines: again })).not.toBe(rev);
+    expect(changeVersion({ ...file, lines: [...file.lines, row("add", 31, "// more")] })).not.toBe(rev);
   });
 
   it("shows each changed file once, colour-coded with both line numbers, with a way to collapse it", () => {

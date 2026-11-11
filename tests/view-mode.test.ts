@@ -156,8 +156,8 @@ describe("view-only mode (no GitLab application)", () => {
     const r = await fetch(base + "/api/team/api/-/merge_requests/7/viewed", {
       method: "POST",
       headers: { cookie, "Content-Type": "application/json" },
-      body: JSON.stringify({ symbolId: "src/a.ts#a", viewed: true }),
+      body: JSON.stringify({ id: "file:src/a.ts", rev: "abc", viewed: true }),
     });
-    expect(await r.json()).toEqual({ viewed: ["src/a.ts#a"] });
+    expect(await r.json()).toEqual({ viewed: { "file:src/a.ts": "abc" } });
   });
 });

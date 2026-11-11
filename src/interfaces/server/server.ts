@@ -262,11 +262,13 @@ export function createApp(deps: AppDeps): Server {
       const host = deps.hostFor(tokenFor(session));
       const body = await readJson(req);
       if (api[3] === "viewed") {
-        if (typeof body.symbolId !== "string" || !body.symbolId || typeof body.viewed !== "boolean") {
-          throw new HttpError(400, "Expected { symbolId, viewed }.");
+        const { id, rev, viewed: on } = body;
+        // A mark needs the version of the change that was viewed; removing one does not.
+        if (typeof id !== "string" || !id || typeof on !== "boolean" || (on && (typeof rev !== "string" || !rev))) {
+          throw new HttpError(400, "Expected { id, rev, viewed }.");
         }
         const mr = await host.getMergeRequest(projectPath, iid); // checks access, gives the canonical path
-        const viewed = await deps.viewed.setViewed(session.user.username, mr.projectPath, iid, body.symbolId, body.viewed);
+        const viewed = await deps.viewed.setViewed(session.user.username, mr.projectPath, iid, id, on ? (rev as string) : null);
         return json(res, 200, { viewed });
       }
       if (viewOnly) throw new HttpError(403, "View-only mode: comments and approvals are turned off.");
