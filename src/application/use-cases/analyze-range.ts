@@ -29,12 +29,15 @@ export class AnalyzeRangeUseCase {
 
     const fileChanges = this.diffReader.getFileChanges(base, head);
 
+    const baseSources = this.readSources(mergeBase, fileChanges.flatMap((fc) => (fc.basePath ? [fc.basePath] : [])));
+    const headSources = this.readSources(resolvedHead, fileChanges.flatMap((fc) => (fc.headPath ? [fc.headPath] : [])));
+
     const files: FileView[] = [];
     const symbols = fileChanges.flatMap((fc) => {
       const parser = this.parsers.find((p) => p.supportedExtensions.includes(extname(fc.path).toLowerCase()));
 
-      const baseSource = fc.basePath ? this.sourceReader.getSource(mergeBase, fc.basePath) : null;
-      const headSource = fc.headPath ? this.sourceReader.getSource(resolvedHead, fc.headPath) : null;
+      const baseSource = fc.basePath ? (baseSources.get(fc.basePath) ?? null) : null;
+      const headSource = fc.headPath ? (headSources.get(fc.headPath) ?? null) : null;
       // Binary files (images, archives...) have no lines to show.
       if ((baseSource ?? "").includes("\0") || (headSource ?? "").includes("\0")) return [];
 
@@ -65,6 +68,15 @@ export class AnalyzeRangeUseCase {
     return { base: resolvedBase, head: resolvedHead, symbols, nodes, edges, files, exactness, ...(range ? { range } : {}) };
   }
 
+  /** Many files of one revision, in bulk when the reader can. */
+  private readSources(rev: string, paths: string[]): Map<string, string | null> {
+    const unique = [...new Set(paths)];
+    return (
+      this.sourceReader.getSources?.(rev, unique) ??
+      new Map(unique.map((p) => [p, this.sourceReader.getSource(rev, p)]))
+    );
+  }
+
   private buildGraph(
     symbols: ChangedSymbol[],
     headRev: string,
@@ -82,12 +94,11 @@ export class AnalyzeRangeUseCase {
       const allFiles = this.sourceReader.listFiles(headRev);
 
       for (const builder of this.graphBuilders) {
-        const files = allFiles
-          .filter((p) => builder.supportedExtensions.includes(extname(p).toLowerCase()))
-          .flatMap((path) => {
-            const source = this.sourceReader.getSource(headRev, path);
-            return source === null ? [] : [{ path, source }];
-          });
+        const sources = this.readSources(
+          headRev,
+          allFiles.filter((p) => builder.supportedExtensions.includes(extname(p).toLowerCase())),
+        );
+        const files = [...sources].flatMap(([path, source]) => (source === null ? [] : [{ path, source }]));
 
         const result = builder.build({ files, changedIds, removed, depth });
         for (const n of result.nodes) if (!nodes.has(n.id)) nodes.set(n.id, n);

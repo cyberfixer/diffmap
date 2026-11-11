@@ -8,6 +8,12 @@ export interface SourceReaderPort {
    */
   getSource(rev: string, filePath: string): string | null;
 
+  /**
+   * The same for many files at once, keyed by path. Optional: readers that
+   * can fetch files in bulk implement it, since reading one by one is slow.
+   */
+  getSources?(rev: string, filePaths: string[]): Map<string, string | null>;
+
   /** List every tracked file path at the given revision. */
   listFiles(rev: string): string[];
 }

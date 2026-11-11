@@ -93,7 +93,7 @@ sequenceDiagram
   U->>CLI: diffmap main --format html
   CLI->>L: load languages (TypeScript, tree-sitter grammars, Angular)
   CLI->>UC: execute("main", "HEAD")
-  UC->>G: git diff main...HEAD, git show (old + new file)
+  UC->>G: git diff main...HEAD, git cat-file --batch (old + new files, one process)
   UC->>UC: file views, changed symbols, call graph
   UC-->>CLI: AnalysisResult
   CLI->>R: renderHtml(result)
