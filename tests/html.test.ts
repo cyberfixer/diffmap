@@ -208,9 +208,36 @@ describe("renderHtml", () => {
     expect(syms[1].refs[0].bad).toBe(true);
   });
 
-  it("warns about calls into removed code", () => {
+  it("warns about calls into removed code, with a list of them", () => {
     const html = renderHtml(result);
     expect(html).toContain("1 call still points at removed code");
+    // The count is a button that opens the list; the list has its own tab.
+    expect(html).toMatch(/<button class="pill warn" id="brokenpill"/);
+    expect(html).toMatch(/id="tabb"[^>]*>Removed code<em>1<\/em>/);
+    expect(html).toContain('id="blist"');
+
+    const clean = renderHtml({ ...result, edges: result.edges.filter((e) => e.kind !== "calls-removed") });
+    expect(clean).not.toContain('id="tabb"');
+    expect(clean).not.toContain('id="brokenpill"');
+  });
+
+  it("has back and forward, and keeps the definition apart from the usages", () => {
+    const html = renderHtml(result);
+    expect(html).toMatch(/id="back"[^>]*disabled/);
+    expect(html).toMatch(/id="fwd"[^>]*disabled/);
+    expect(html).toContain("<kbd>←</kbd><kbd>→</kbd> back / forward");
+    expect(html).toContain("if (k === 'ArrowRight') { e.preventDefault(); forward(); return; }");
+    // Stepping through usages only redraws the panel; it does not scroll the code.
+    expect(html).toMatch(/function step\(d\) \{[^}]*renderDock\(\);\s*\}/);
+    expect(html).toContain("Show in the code above");
+  });
+
+  it("stays quick on big changes: files off screen are not laid out, panel sizes are not inherited", () => {
+    const html = renderHtml(result);
+    expect(html).toContain(".fsec { content-visibility:auto;");
+    expect(html).toContain(".sf { content-visibility:auto;");
+    expect(html).toContain('@property --lw { syntax:"<length>"; inherits:false;');
+    expect(html).toContain("requestAnimationFrame(apply)");
   });
 
   it("escapes code, including inside the script data", () => {

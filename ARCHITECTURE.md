@@ -172,7 +172,7 @@ server side (or in the CLI). The browser then only adds behaviour.
 flowchart LR
   R["render-html.ts<br/>files, sidebar, header<br/>+ a DIFFMAP data object"] --> P["the page"]
   S["html-style.ts<br/>colours (light/dark), layout"] --> P
-  C["html-client.ts<br/>selection, go to definition/usages,<br/>usages panel, folding, viewed"] --> P
+  C["html-client.ts<br/>selection, back/forward,<br/>usages panel, folding, viewed"] --> P
   M["html-client-mr.ts<br/>comments, replies, approve<br/>(service only)"] --> P
   T["theme.ts<br/>Auto / Light / Dark button"] --> P
 ```
@@ -184,10 +184,17 @@ flowchart LR
 - **The `DIFFMAP` object** in the page holds, per changed symbol, its before/after
   lines and every place it is used, with the id of the row to highlight.
 - **[html-client.ts](src/interfaces/html/html-client.ts)** underlines the name of
-  each changed symbol, highlights the selected symbol's lines, moves between a
-  definition and its usages on click, fills the usages panel under the code
-  (callers outside the change are shown there in full), and handles folding,
-  collapsing files and the per-file "viewed" ticks.
+  each changed symbol and highlights the selected symbol's lines. Selecting takes
+  the code column to the definition; the panel under the code lists the usages
+  and shows the code around the one picked (callers outside the change in full),
+  without moving the code column. It also keeps the back/forward history, fills
+  the "Removed code" list (calls into code the change removes), and handles
+  folding, collapsing files and the per-file "viewed" ticks.
+- **Big changes:** each file section and each sidebar entry has
+  `content-visibility: auto`, so the browser lays out only what is near the
+  screen. The panel sizes are CSS properties registered as not inherited, and a
+  drag applies them once per frame. Measured on a made-up change of 400 files ×
+  300 lines: one resize step went from about 960 ms to one frame.
 - **[html-client-mr.ts](src/interfaces/html/html-client-mr.ts)** is added only on
   the service: comment threads under their lines, the comment box, Approve.
 

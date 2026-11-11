@@ -8,6 +8,12 @@
 
 ## Done
 
+### 24. Review screen: quick on big changes, definition above / usages below — DONE
+- Big merge requests: files and list entries off screen are not laid out (`content-visibility`); dividers are 12px to grab and apply once per frame. On a made-up 400-file change a resize step went from about 960 ms to one frame, selecting a symbol from about 190 ms to under 35 ms.
+- The code column goes to the definition and stays there; the panel shows usages only, with the code around the one picked. "Show in the code above" takes the code to a usage.
+- ← Back and Forward → (also the arrow keys), restoring what was selected.
+- "Removed code" tab and a clickable count in the top bar: every call that still points at code the change removes.
+
 ### 16. "Viewed" resets when a file changes again — DONE
 - A "viewed" tick is saved with a fingerprint of the file's change (its added and removed lines). A later push that changes the file again clears the tick and marks the file "Changed since you viewed it"; a rebase that leaves the change as it was keeps it. Ticks saved before this are cleared once.
 

@@ -416,9 +416,10 @@ export function renderHtml(
     : range
       ? `${range.headName} → ${range.baseName}${commits} · ${short(result.base)}..${short(result.head)}`
       : `${short(result.base)}..${short(result.head)}`;
-  const broken = result.edges.filter((e) => e.kind === "calls-removed").length;
+  // Every line that still calls code this change removes; the pill opens the list of them.
+  const broken = syms.reduce((a, s) => a + s.refs.filter((r) => r.bad).length, 0);
   const warnPill = broken
-    ? `<span class="pill warn">${broken === 1 ? "1 call still points" : `${broken} calls still point`} at removed code</span>`
+    ? `<button class="pill warn" id="brokenpill" type="button" title="List these calls">${broken === 1 ? "1 call still points" : `${broken} calls still point`} at removed code</button>`
     : "";
 
   const outUses = syms.reduce((a, s) => a + s.refs.filter((r) => r.out).length, 0);
@@ -467,8 +468,8 @@ export function renderHtml(
   </div>
 </header>
 <div class="work" id="work">
-  <div class="rz l" id="rzl" title="Drag to resize · double-click to reset" aria-hidden="true"></div>
   <aside class="side">
+    <div class="rz l" id="rzl" title="Drag to resize · double-click to reset" aria-hidden="true"></div>
     <div class="side-head"><span class="cap">Changes · ${views.length} file${views.length === 1 ? "" : "s"}</span><input id="filter" type="search" placeholder="Filter files and symbols" aria-label="Filter files and symbols"></div>
     <nav class="side-list mono" aria-label="Changed files">${sidebar}</nav>
   </aside>
@@ -483,8 +484,10 @@ export function renderHtml(
         <button class="dtab" id="tabu" type="button" aria-selected="true">Usages<em id="ucount">0</em></button>
         ${mrPage ? `<button class="dtab" id="tabc" type="button" aria-selected="false">Comments<em id="ccount">${mrPage.discussions.length}</em></button>` : ""}
         <button class="dtab" id="tabs" type="button" aria-selected="false" title="Search the text of the files in this diff (/)">Search</button>
+        ${broken ? `<button class="dtab warn" id="tabb" type="button" aria-selected="false" title="Calls that still point at code this change removes">Removed code<em>${broken}</em></button>` : ""}
         <div class="what" id="what"></div>
-        <button class="mini" id="back" type="button" disabled title="Back to where you were (← or Alt+←)">← Back</button>
+        <button class="mini" id="back" type="button" disabled title="Back to where you were (←)">← Back</button>
+        <button class="mini" id="fwd" type="button" disabled title="Forward again (→)">Forward →</button>
         <button class="mini" id="prevu" type="button" hidden title="Previous usage (↑ or Shift+F4)" aria-label="Previous usage">↑</button>
         <button class="mini" id="nextu" type="button" hidden title="Next usage (↓ or F4)" aria-label="Next usage">↓</button>
         <button class="mini" id="closed" type="button" hidden title="Close (Esc)" aria-label="Close panel">✕</button>
@@ -494,6 +497,7 @@ export function renderHtml(
         <div class="sbar"><input id="q" type="search" placeholder="Search in the changed files" aria-label="Search in the changed files" autocomplete="off" spellcheck="false"><span id="qn" aria-live="polite"></span></div>
         <div class="slist" id="slist"></div>
       </div>
+      ${broken ? `<div class="spane" id="bpane" hidden><div class="slist" id="blist"></div></div>` : ""}
       ${mrPage ? `<div class="cpane" id="cpane" hidden></div>` : ""}
     </section>
   </main>
@@ -504,7 +508,7 @@ export function renderHtml(
   ${outSummary}
   ${exactNote(result, mrPage?.indexState)}
   ${mrPage && !mrPage.readOnly ? `<span class="chint"><span class="plus" aria-hidden="true">+</span>Click a line number to comment on that line</span>` : ""}
-  <span class="keys" title="Keyboard shortcuts. The arrow keys move through usages while a symbol is selected; otherwise they scroll."><span><kbd>↑</kbd><kbd>↓</kbd> usages</span><span><kbd>→</kbd> definition</span><span><kbd>←</kbd> back</span><span><kbd>N</kbd><kbd>P</kbd> next / previous file</span><span><kbd>/</kbd> search</span><span><kbd>V</kbd> viewed</span><span><kbd>C</kbd> collapse</span><span><kbd>Esc</kbd> close</span></span>
+  <span class="keys" title="Keyboard shortcuts. The up and down arrows move through usages while a symbol is selected; otherwise they scroll."><span><kbd>←</kbd><kbd>→</kbd> back / forward</span><span><kbd>↑</kbd><kbd>↓</kbd> usages</span><span><kbd>N</kbd><kbd>P</kbd> next / previous file</span><span><kbd>/</kbd> search</span><span><kbd>V</kbd> viewed</span><span><kbd>C</kbd> collapse</span><span><kbd>Esc</kbd> close</span></span>
   <span class="vprog">Viewed <span><span id="vcount">0</span> of ${views.length} file${views.length === 1 ? "" : "s"}</span><span class="bar"><span id="vbar"></span></span></span>
 </footer>
 <div id="outsrc" hidden>

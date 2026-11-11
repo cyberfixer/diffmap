@@ -33,6 +33,9 @@ export const STYLE = `
   :root { color-scheme: light dark; }
   :root[data-theme="light"] { color-scheme: light; }
   :root[data-theme="dark"] { color-scheme: dark; }
+  /* Panel sizes. Not inherited, so dragging a divider doesn't restyle every line of code. */
+  @property --lw { syntax:"<length>"; inherits:false; initial-value:270px; }
+  @property --dh { syntax:"<length-percentage>"; inherits:false; initial-value:40%; }
   * { box-sizing:border-box; }
   [hidden] { display:none !important; }
   html, body { margin:0; height:100%; }
@@ -54,6 +57,8 @@ export const STYLE = `
   .acts { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
   .pill { display:inline-flex; gap:6px; padding:3px 9px; border:1px solid var(--line); border-radius:999px; font-size:12px; color:var(--fg2); }
   .pill.warn { color:var(--del-fg); border-color:var(--del-edge); background:var(--del-bg); }
+  button.pill { cursor:pointer; font-family:inherit; }
+  button.pill:hover { border-color:var(--del-fg); }
   .hbtn, .theme { display:inline-flex; align-items:center; justify-content:center; gap:6px; min-height:30px; padding:0 12px;
           border:1px solid var(--line-strong); border-radius:6px; background:var(--panel); color:var(--fg);
           font-size:13px; text-decoration:none; cursor:pointer; }
@@ -69,13 +74,15 @@ export const STYLE = `
 
   /* ── explorer and editor ── */
   .work { --lw:270px; position:relative; flex:1; min-height:0; display:grid; grid-template-columns:var(--lw) minmax(0, 1fr); }
+  /* Dividers: 12px to grab, on the edge between two panels. */
   .rz { position:absolute; z-index:6; touch-action:none; }
-  .rz.l { top:0; bottom:0; left:calc(var(--lw) - 4px); width:8px; cursor:col-resize; }
-  .rz.b { left:0; right:0; top:-4px; height:8px; cursor:row-resize; }
-  .rz.l:hover, .rz.l.on { background:linear-gradient(var(--accent), var(--accent)) center / 2px 100% no-repeat; }
-  .rz.b:hover, .rz.b.on { background:linear-gradient(var(--accent), var(--accent)) center / 100% 2px no-repeat; }
-  body.resizing, body.resizing * { user-select:none; }
-  aside.side { background:var(--side); border-right:1px solid var(--line); display:flex; flex-direction:column; min-height:0; }
+  .rz.l { top:0; bottom:0; right:-7px; width:12px; cursor:col-resize; }
+  .rz.b { left:0; right:0; top:-6px; height:12px; cursor:row-resize; }
+  .rz.l:hover, .rz.l.on { background:linear-gradient(var(--accent), var(--accent)) center / 3px 100% no-repeat; }
+  .rz.b:hover, .rz.b.on { background:linear-gradient(var(--accent), var(--accent)) center / 100% 3px no-repeat; }
+  body.resizing { user-select:none; }
+  body.resizing .ed, body.resizing .dpane, body.resizing .side-list { pointer-events:none; }
+  aside.side { position:relative; background:var(--side); border-right:1px solid var(--line); display:flex; flex-direction:column; min-height:0; }
   .side-head { display:flex; flex-direction:column; gap:8px; padding:12px 12px 8px 16px; }
   .cap { font-size:11px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); }
   #filter { width:100%; height:28px; padding:0 8px; border:1px solid var(--line); border-radius:5px; background:var(--panel);
@@ -90,6 +97,8 @@ export const STYLE = `
   .tf-dir[aria-expanded="false"] .chev, .fold[aria-expanded="false"] .chev { transform:rotate(-90deg); }
   .tf-dir[aria-expanded="false"] + .tf-kids { display:none; }
   .tf-kids { margin-left:13px; padding-left:5px; border-left:1px solid var(--line); }
+  /* Like the files in the code column: entries far from the screen are not laid out. */
+  .sf { content-visibility:auto; contain-intrinsic-size:auto 26px; }
   .sf-file .p { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; font-weight:600; }
   .sf-file.fs-added .p { color:var(--add-fg); }
   .sf-file.fs-modified .p { color:var(--mod-fg); }
@@ -112,6 +121,8 @@ export const STYLE = `
   .empty { padding:40px; text-align:center; color:var(--muted); }
 
   /* ── one changed file ── */
+  /* A file far from the screen is not laid out or painted until it comes near, which keeps big changes quick. */
+  .fsec { content-visibility:auto; contain-intrinsic-size:auto 500px; }
   .fh { position:sticky; top:0; z-index:2; display:flex; align-items:center; gap:10px; min-height:34px; padding:3px 12px 3px 8px;
         background:var(--side); border-bottom:1px solid var(--line); font-size:12px; }
   .fsec + .fsec .fh { border-top:1px solid var(--line); }
@@ -172,10 +183,6 @@ export const STYLE = `
   .gap button { border:0; border-radius:4px; padding:0 6px; background:transparent; color:var(--muted); font:inherit; cursor:pointer; }
   .gap button:hover { color:var(--fg); background:var(--hover); }
   .gap .ga { color:var(--accent); }
-  .more { display:block; width:100%; border:0; padding:3px 12px 3px 96px; text-align:left; background:var(--side); color:var(--accent);
-          font:12px/20px var(--sans); cursor:pointer; }
-  .more:hover { background:var(--hover); }
-  .ro.cut .dl.extra { display:none; }
   .deco { color:var(--muted); font:11px var(--mono); padding:2px 12px 0 96px; }
   .tk-keyword { color:var(--tk-keyword); } .tk-string { color:var(--tk-string); }
   .tk-comment { color:var(--tk-comment); font-style:italic; } .tk-number { color:var(--tk-number); }
@@ -190,6 +197,8 @@ export const STYLE = `
   .dtab { height:34px; padding:0 8px; border:0; border-bottom:2px solid transparent; background:transparent; color:var(--muted); cursor:pointer; }
   .dtab:hover { color:var(--fg); }
   .dtab[aria-selected="true"] { color:var(--fg); border-bottom-color:var(--accent); }
+  .dtab.warn, .dtab.warn[aria-selected="true"] { color:var(--del-fg); }
+  .dtab.warn[aria-selected="true"] { border-bottom-color:var(--del-fg); }
   .dtab em { font-style:normal; margin-left:5px; padding:0 6px; border-radius:999px; background:var(--hover); font-size:11px; }
   .what { flex:1; min-width:0; display:flex; align-items:center; gap:8px; margin-left:10px; overflow:hidden; white-space:nowrap; font-size:12px; color:var(--muted); }
   .what .wn { flex:none; font:600 13px var(--mono); color:var(--fg); }
@@ -213,6 +222,8 @@ export const STYLE = `
   .ref .rt { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .ref .tag { flex:none; font:11px var(--sans); color:var(--muted); }
   .ref.bad .rt { color:var(--del-fg); }
+  .ref .rp { flex:none; max-width:45%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted); }
+  .rf .gone { color:var(--del-fg); text-decoration:line-through; font-weight:600; }
   .ref.resolved { opacity:.6; }
   .none { padding:10px 8px; color:var(--muted); }
   .prev { position:relative; min-width:0; overflow:auto; }
@@ -283,7 +294,7 @@ export const STYLE = `
     .ulist { border-right:0; border-bottom:1px solid var(--line); }
     .what .wl, .what .wf { display:none; }
     .thread, .composer { margin-left:16px; }
-    .gap, .more { padding-left:16px; }
+    .gap { padding-left:16px; }
     .keys { display:none; }
   }
 `;

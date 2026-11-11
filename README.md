@@ -265,25 +265,37 @@ The page is laid out like a code editor.
 | **Top bar** | Title (the MR title, or the first commit), branches and commit count. On the service also Approve and a link to GitLab. |
 | **Left** | Changed files as a folder tree (folders fold; a file's name is green when added, amber when modified, red when deleted), with the functions changed in each and how often they are used. Type in the box to filter. A ✓ marks files you have viewed. |
 | **Middle** | The code. Every changed file, one under the other, in one column you scroll like any page; the file's path stays pinned at the top while you are in it. Green for added lines and red for removed ones, unchanged lines folded. On a bar of folded lines, open 20 from its top, 20 from its bottom, or all of them; **Whole file** opens everything and **Changes only** folds it all again, including lines you opened by hand. Files over 500 lines (HTML over 300) start collapsed; click **Show**. |
-| **Bottom panel** | Opens when you select a function: its definition, then every place it is used, grouped by file. Next to the list is the code for the line you picked. For the definition that is its first 12 lines, with a button to show the rest. |
+| **Bottom panel** | Opens when you select a function: every place it is used, grouped by file. Next to the list is the code around the usage you picked. The **Removed code** tab (only there when needed) lists every call that still points at code the change removes. |
 | **Status bar** | Lines added/removed, number of files and functions, whether calls are exact, the keyboard shortcuts, and how many files you have viewed. |
 
-**Moving around.** The name of each changed function is underlined, on its
-definition and wherever it is used. Click a function in the left list, or its
-name where it is used, to **go to its definition**: the code scrolls to it and
-the bottom panel shows its first lines. Click the name on the definition to
-**list its usages** in the bottom panel; click again for the next usage.
-Usages inside the change scroll the code to that line. Usages **outside the
-change** are shown in the panel as the whole calling function. The definition and
-every line that uses it are highlighted (red when the line still calls code the
-change removes). **← Back** returns to where you were before a jump. With
-nothing selected you see just the change.
+**Moving around.** The two parts have separate jobs: the code in the middle
+shows the **definition**, the bottom panel shows the **usages**. The name of each
+changed function is underlined, on its definition and wherever it is used. Click
+a function in the left list, or its name where it is used, and the code goes to
+its definition and stays there, while the panel lists every usage. Click a usage
+in the list (or press `↓` / `↑`) to see the code around it in the panel; the code
+in the middle does not move. Usages **outside the change** are shown in the panel
+as the whole calling function. To take the middle to a usage, click **Show in the
+code above** over its preview. The definition and every line that uses it are
+highlighted (red when the line still calls code the change removes).
+**← Back** and **Forward →** work like in a browser: they return to where the
+code was before a jump, with what was selected then. With nothing selected you
+see just the change.
+
+**Calls into removed code.** When lines still call something the change removes,
+the top bar says how many. Click that, or the **Removed code** tab, for the list
+of all of them, grouped by what was removed. Click one: the code goes to the
+removed function and the panel shows that call.
+
+**Big changes.** Files and list entries far from the screen are not drawn until
+you scroll near them, so the page stays quick with hundreds of files. Drag the
+line between the file list and the code, or between the code and the panel, to
+resize them (double-click to reset).
 
 | Key | What it does |
 |---|---|
-| `↓` / `↑` | Next / previous stop (definition, then each usage) while a function is selected. With nothing selected the arrows scroll as usual. `F4` / `Shift+F4` do the same. |
-| `→` | Go to the selected function's definition |
-| `←` | Back to where you were before the last jump |
+| `←` / `→` | Back / forward: where the code was before and after a jump |
+| `↓` / `↑` | Next / previous usage in the panel while a function is selected. With nothing selected the arrows scroll as usual. `F4` / `Shift+F4` do the same. |
 | `N` / `P` | Next / previous file |
 | `/` | Search (see below) |
 | `V` | Mark the file at the top of the screen as viewed (or not viewed) |
