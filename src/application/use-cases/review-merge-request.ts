@@ -48,8 +48,37 @@ export interface CommentRequest {
 }
 
 interface Job {
+  mr: MergeRequestInfo;
   status: PreparingStatus;
   promise: Promise<Cached>;
+}
+
+/** One analysis that ended, for the dashboard. */
+export interface FinishedAnalysis {
+  projectPath: string;
+  iid: number;
+  title: string;
+  finishedAt: number;
+  /** From the first visit to the map being ready; the parts are getting the code and analysing it. */
+  totalMs: number;
+  downloadMs: number;
+  analysisMs: number;
+  ok: boolean;
+  error?: string;
+  indexState?: IndexState;
+  changedFiles?: number;
+  symbols?: number;
+}
+
+/** What the service is doing now and did lately, for the dashboard. */
+export interface ReviewActivity {
+  running: { projectPath: string; iid: number; title: string; status: PreparingStatus }[];
+  /** Newest first. */
+  recent: FinishedAnalysis[];
+  /** Analyses kept in memory, of at most `maxCached`. */
+  cached: number;
+  maxCached: number;
+  totals: { analysed: number; failed: number; servedFromMemory: number };
 }
 
 interface Cached {
@@ -59,6 +88,7 @@ interface Cached {
 }
 
 const MAX_CACHED = 20;
+const MAX_RECENT = 50;
 /** Without an index, look again this often (a CI job may finish after the first visit). */
 const RECHECK_MS = 60_000;
 const keyOf = (mr: MergeRequestInfo) => `${mr.projectPath}@${mr.diffRefs.baseSha}..${mr.diffRefs.headSha}`;
@@ -71,6 +101,8 @@ const keyOf = (mr: MergeRequestInfo) => `${mr.projectPath}@${mr.diffRefs.baseSha
  */
 export class ReviewMergeRequestUseCase {
   private jobs = new Map<string, Job>();
+  private recent: FinishedAnalysis[] = [];
+  private totals = { analysed: 0, failed: 0, servedFromMemory: 0 };
 
   constructor(
     private readonly repos: RepoCachePort,
@@ -113,7 +145,7 @@ export class ReviewMergeRequestUseCase {
       const job = this.start(mr, token, host);
       if (!opts.wait) return { ready: false, mr, status: job.status };
       cached = await this.settle(key, job);
-    }
+    } else this.totals.servedFromMemory++;
     const [discussions, approvals] = await Promise.all([
       host.listDiscussions(mr.projectPath, iid),
       host.getApprovals(mr.projectPath, iid),
@@ -148,6 +180,23 @@ export class ReviewMergeRequestUseCase {
     if (existing) return existing;
 
     const status: PreparingStatus = { state: "downloading", step: "Getting the code", percent: null, detail: "", startedAt: Date.now() };
+    let codeReadyAt = 0;
+    const finished = (rest: Pick<FinishedAnalysis, "ok"> & Partial<FinishedAnalysis>): void => {
+      const now = Date.now();
+      this.recent.unshift({
+        projectPath: mr.projectPath,
+        iid: mr.iid,
+        title: mr.title,
+        finishedAt: now,
+        totalMs: now - status.startedAt,
+        downloadMs: (codeReadyAt || now) - status.startedAt,
+        analysisMs: codeReadyAt ? now - codeReadyAt : 0,
+        ...rest,
+      });
+      this.recent.length = Math.min(this.recent.length, MAX_RECENT);
+      if (rest.ok) this.totals.analysed++;
+      else this.totals.failed++;
+    };
     const promise = (async (): Promise<Cached> => {
       let look: IndexLookup | null = known ?? null;
       if (!look && host.findIndex) {
@@ -159,6 +208,7 @@ export class ReviewMergeRequestUseCase {
         status.percent = p.percent;
         status.detail = p.detail;
       });
+      codeReadyAt = Date.now();
       Object.assign(status, {
         state: "analysing",
         step: "Analysing the changes",
@@ -173,15 +223,30 @@ export class ReviewMergeRequestUseCase {
       if (this.cache.size > MAX_CACHED) this.cache.delete(this.cache.keys().next().value!);
       Object.assign(status, { state: "ready", step: "Ready", percent: 100, detail: "" });
       this.jobs.delete(key);
+      finished({ ok: true, indexState: cached.indexState, changedFiles: result.files.length, symbols: result.symbols.length });
       return cached;
     })();
     promise.catch((err: unknown) => {
       status.state = "error";
       status.error = err instanceof Error ? err.message : String(err);
+      finished({ ok: false, error: status.error });
     });
-    const job = { status, promise };
+    const job = { mr, status, promise };
     this.jobs.set(key, job);
     return job;
+  }
+
+  /** What is being got ready now, what was lately, and how much is kept in memory. */
+  activity(): ReviewActivity {
+    return {
+      running: [...this.jobs.values()]
+        .filter((j) => j.status.state === "downloading" || j.status.state === "analysing")
+        .map((j) => ({ projectPath: j.mr.projectPath, iid: j.mr.iid, title: j.mr.title, status: { ...j.status } })),
+      recent: [...this.recent],
+      cached: this.cache.size,
+      maxCached: MAX_CACHED,
+      totals: { ...this.totals },
+    };
   }
 
   /**

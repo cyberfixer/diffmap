@@ -13,6 +13,15 @@ export interface RepoCacheLimits {
   reviewRefMaxAgeMs?: number;
 }
 
+/** The room the code cache takes, for the dashboard. */
+export interface RepoCacheUsage {
+  /** Biggest first. `name` is the project's path with "/" written as "_". */
+  projects: { name: string; bytes: number; lastUsed: number }[];
+  totalBytes: number;
+  /** The limit (CACHE_MAX_GB), or null for none. */
+  maxBytes: number | null;
+}
+
 const HOUR = 3600_000;
 const DAY = 24 * HOUR;
 /** Files diffmap keeps inside each bare repo; their times say when it was last used / tidied. */
@@ -119,6 +128,26 @@ export class GitRepoCache implements RepoCachePort {
     await git(["gc", "-q", "--auto"], gitDir);
     if (old.length) await git(["gc", "-q"], gitDir);
     return old.length;
+  }
+
+  private measured: { at: number; usage: Promise<RepoCacheUsage> } | null = null;
+
+  /** How much room each project's code takes. Measuring walks every file, so an answer is kept for a minute. */
+  usage(now = Date.now()): Promise<RepoCacheUsage> {
+    if (this.measured && now - this.measured.at < 60_000) return this.measured.usage;
+    const usage = (async (): Promise<RepoCacheUsage> => {
+      const names = (await readdir(this.root).catch(() => [] as string[])).filter((n) => n.endsWith(".git"));
+      const projects = await Promise.all(
+        names.map(async (name) => {
+          const dir = join(this.root, name);
+          return { name: name.slice(0, -".git".length), bytes: await sizeOf(dir), lastUsed: await lastUsed(dir) };
+        }),
+      );
+      projects.sort((a, b) => b.bytes - a.bytes);
+      return { projects, totalBytes: projects.reduce((sum, p) => sum + p.bytes, 0), maxBytes: Number.isFinite(this.limits.maxBytes) ? this.limits.maxBytes : null };
+    })();
+    this.measured = { at: now, usage };
+    return usage;
   }
 
   /** Start a trim unless one ran recently or is running. */

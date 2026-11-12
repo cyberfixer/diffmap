@@ -11,7 +11,7 @@ const DARK = "--bg:#141413; --panel:#1B1B19; --side:#171715; --line:#2C2B28; --l
 const LOGO = `<svg aria-hidden="true" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2.5"></circle><circle cx="19" cy="6" r="2.5"></circle><circle cx="12" cy="18" r="2.5"></circle><path d="M7.5 6h9M6.5 8.2l4.2 7.6M17.5 8.2l-4.2 7.6"></path></svg>`;
 
 /** A small centred page in the same look as the report. */
-function shell(title: string, body: string): string {
+export function shell(title: string, body: string, maxWidth = 520): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -33,7 +33,7 @@ function shell(title: string, body: string): string {
   body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px 16px;
          background:var(--bg); color:var(--fg); font:14px/1.5 'IBM Plex Sans', system-ui, sans-serif; }
   /* The same window look as the review page: a title bar on top of a plain panel. */
-  main { width:100%; max-width:520px; background:var(--panel); border:1px solid var(--line-strong); border-radius:8px; overflow:hidden; }
+  main { width:100%; max-width:${maxWidth}px; background:var(--panel); border:1px solid var(--line-strong); border-radius:8px; overflow:hidden; }
   .brand { display:flex; align-items:center; gap:8px; min-height:44px; padding:6px 10px 6px 16px; font-weight:600; font-size:14px;
            background:var(--side); border-bottom:1px solid var(--line); }
   .brand svg { width:20px; height:20px; }
@@ -94,7 +94,7 @@ export function signInPage(host: HostProfile, returnTo: string, mode: "full" | "
   );
 }
 
-export function homePage(user: Person, host: HostProfile, error = ""): string {
+export function homePage(user: Person, host: HostProfile, error = "", admin = false): string {
   return shell(
     "diffmap",
     `<h1>Open a ${host.reviewName}</h1>
@@ -105,7 +105,7 @@ export function homePage(user: Person, host: HostProfile, error = ""): string {
   ${error ? `<p class="err" style="margin:10px 0 0">${esc(error)}</p>` : ""}
   <button class="btn" type="submit">Open map</button>
 </form>
-<div class="foot"><span>Signed in as <b>${esc(user.name)}</b> (@${esc(user.username)})</span>
+<div class="foot"><span>Signed in as <b>${esc(user.name)}</b> (@${esc(user.username)})${admin ? ` · <a href="/dashboard">Dashboard</a>` : ""}</span>
 <form method="post" action="/auth/logout"><button type="submit">Sign out</button></form></div>`
   );
 }
