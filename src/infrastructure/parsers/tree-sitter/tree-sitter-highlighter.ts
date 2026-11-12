@@ -1,19 +1,18 @@
-import type Parser from "web-tree-sitter";
+import type { Node } from "./node.js";
 import type {
   HighlightKind,
   HighlightToken,
   SyntaxHighlighterPort,
 } from "../../../application/ports/syntax-highlighter.port.js";
-import type { LanguageSpec } from "./languages.js";
+import { calledName, type LanguageSpec } from "./languages.js";
 import type { TreeSitterEngine } from "./engine.js";
 
-type Node = Parser.SyntaxNode;
 
 // Node-type patterns that mean the same thing in most tree-sitter grammars.
 const COMMENT = /comment/;
 const STRING = /^(string|string_literal|raw_string_literal|interpreted_string_literal|template_string|char_literal|character_literal|rune_literal|heredoc_body|encapsed_string|line_string_literal|multi_line_string_literal|verbatim_string_literal)$/;
 const NUMBER = /number|integer|float|decimal|hex_|_literal$/;
-const DECORATOR = /^(decorator|annotation|marker_annotation|attribute_item|attribute_list)$/;
+const DECORATOR = /^(decorator|annotation|marker_annotation|attribute_item|attribute_list|attribute)$/; // attribute: Swift @MainActor
 const TYPE = /^(type_identifier|primitive_type|integral_type|floating_point_type|boolean_type|void_type|predefined_type|builtin_type|sized_type_specifier)$/;
 const CONSTANT = /^(true|false|null|nil|none|this|self|super|null_literal|boolean_literal|undefined)$/;
 const IDENT = /(^|_)identifier$|^name$|^constant$/;
@@ -34,10 +33,15 @@ export class TreeSitterHighlighter implements SyntaxHighlighterPort {
     if (lines.length === 0) return [];
     const source = lines.join("\n");
     const kinds: (HighlightKind | undefined)[] = new Array(source.length);
-    const ok = this.engine.with(path, source, (root, spec) => {
-      mark(root, spec, kinds);
-      return true;
-    });
+    const ok = this.engine.with(
+      path,
+      source,
+      (root, spec) => {
+        mark(root, spec, kinds);
+        return true;
+      },
+      true,
+    );
     if (!ok) return null;
 
     const out: HighlightToken[][] = [[]];
@@ -91,8 +95,13 @@ function isFunctionName(node: Node, spec: LanguageSpec): boolean {
     return true;
   }
   const call = spec.calls[p.type];
-  if (call && call(p) === node.text) return true;
+  if (call && calledName(call(p)) === node.text) return true;
+  // A rule that points at the name itself (Swift: call > navigation_expression > navigation_suffix > name).
+  for (let a: Node | null = p, depth = 0; a && depth < 3; a = a.parent, depth++) {
+    const answer = spec.calls[a.type]?.(a);
+    if (answer && typeof answer !== "string" && answer.at) return same(answer.at, node);
+  }
   // a.b.update(...): the last part of a member access that is being called
   const g = p.parent;
-  return !!g && !!spec.calls[g.type] && spec.calls[g.type](g) === node.text && same(p.namedChildren[p.namedChildren.length - 1], node);
+  return !!g && !!spec.calls[g.type] && calledName(spec.calls[g.type](g)) === node.text && same(p.namedChildren[p.namedChildren.length - 1], node);
 }

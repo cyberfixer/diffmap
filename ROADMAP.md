@@ -8,6 +8,18 @@
 
 ## Done
 
+### 26. Swift and iOS code — DONE
+- Swift read badly for reasons of its own: methods are told apart by argument labels, properties hold code, files have no imports, and the bundled grammar was from 2023.
+- Names carry labels (`tableView(_:cellForRowAt:)`, `init(frame:)`): before, every `tableView` and `init` of a file was one symbol and a change in the second was shown on the first one's lines. Calls must fit the labels. A changed signature is one modified method.
+- Properties with code are symbols (computed, set up by a closure, with `didSet`, protocol requirements); reading one, `#selector(x)` and a function passed by name are uses.
+- `super.x()`, a plain `x()` in a type, `Svc(a: 1)` -> `Svc.init(a:)`, `let t: Tab = .init(1)`; subscripts, `defer` and closures run on the spot are no longer calls; a chain over several lines reports each call on its own line (all languages).
+- Files of one module see each other without imports; `@testable import`; UIKit's own class parents.
+- Newer grammar (tree-sitter-swift 0.7.3 in `grammars/`, web-tree-sitter 0.25): macros, `package`, raw strings, typed throws, trailing commas. What it still cannot read (`if let x = try await f() {`, `#if` inside a type, `as? T ?? d`, `unsafe`, `catch A, B`, ... see `swiftPrepare`) is rewritten for the parser only. Signal-iOS, 2,704 Swift files: 1,760 had a parse error before, 27 now.
+- Fewer links by name alone: `items.map { }` is no longer tied to the repo's one `map`. On Apple's sample-food-truck 100 caller -> target pairs went (checked one by one: wrong or renamed, two were right) and 200 came (subviews, inits, property reads). The "one target" count of `measure-links.ts` falls for that reason (Alamofire 66.8% -> 65.3%, ios-oss 73.0% -> 63.9%): it counted those as hits.
+- Of two symbols with one name in a file (overloads that differ by parameter type, in any language), the changed one's lines are shown; before, always the first one's.
+- Checked on Signal-iOS with a hand-made change of 13 files and 23 known answers (which symbol, which lines, who uses it): 23 right; analysis 110 s -> 55 s.
+- Other languages, checked on ten repos (Java, Kotlin, Python, Go, JS, Ruby, PHP, Rust, C#, C++): the matching rules link every call as before; only the lines of chained calls changed. The newer web-tree-sitter recovers differently from code a grammar cannot read: one Kotlin file of 350 lost two methods of a class, and macro-heavy C++ headers (nlohmann/json, 49 of 666 files) come out differently, neither better nor worse.
+
 ### 25. File comments, right-to-left text, changed letters, collapse without losing your place — DONE
 - "Comment" next to a file's name: a comment on the file as a whole (GitHub `subject_type: file`, GitLab `position_type: file`, with a general comment naming the file as the fallback). Shown under the file name and in the Comments tab.
 - Arabic and Hebrew: runs inside code are isolated so they read correctly and don't move the code around them; in plain-text files a line that starts right-to-left is laid out right to left; comments and titles follow their text.

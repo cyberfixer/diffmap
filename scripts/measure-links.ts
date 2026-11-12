@@ -4,7 +4,8 @@
  *   npx vite-node scripts/measure-links.ts <repo folder> [.ext ...] [--show <outcome> [N]]
  *
  * --show prints N (default 20) example calls with that outcome:
- * one, several, tooMany, unreachable, libraryType, external.
+ * one, several, tooMany, unreachable, libraryType, external, or uses (Swift property
+ * reads and functions passed by name that were linked).
  *
  * Counts every call tree-sitter finds: linked to exactly one target, to several,
  * dropped (too many candidates, or none reachable), or external (no symbol of
@@ -49,7 +50,8 @@ const exts = extArgs.length ? extArgs : engine.extensions;
 const files = listFiles(root, exts);
 const examples: string[] = [];
 const { stats: s, meta } = new TreeSitterCallGraph(engine).link(files, [], (c) => {
-  if (c.outcome !== show) return;
+  // --show uses: property reads and functions passed by name that were linked (Swift).
+  if (show === "uses" ? !c.use || c.targets.length === 0 : c.use || c.outcome !== show) return;
   const text = files.find((f) => f.path === c.file)?.source.split("\n")[c.line - 1]?.trim() ?? "";
   examples.push(`${c.file}:${c.line}  ${c.receiver ? c.receiver + " . " : ""}${c.name}   ${text.slice(0, 100)}${c.targets.length ? "  -> " + c.targets.join(", ") : ""}`);
 });
@@ -64,6 +66,7 @@ console.log(`  too many      ${String(s.tooMany).padStart(7)}  ${pct(s.tooMany)}
 console.log(`  unreachable   ${String(s.unreachable).padStart(7)}  ${pct(s.unreachable)}`);
 console.log(`  library type  ${String(s.libraryType).padStart(7)}  ${pct(s.libraryType)}  (left out on purpose)`);
 console.log(`implements links: ${s.implementsLinks}`);
+if (s.uses) console.log(`uses that are not calls (property reads, functions passed by name): ${s.uses}`);
 if (show) {
   console.log(`\n${examples.length} calls "${show}", every ${Math.max(1, Math.floor(examples.length / showCount))}th:`);
   const step = Math.max(1, Math.floor(examples.length / showCount));
