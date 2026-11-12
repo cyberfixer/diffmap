@@ -8,6 +8,13 @@
 
 ## Done
 
+### 27. Rust exact calls, and measuring accuracy — DONE
+- A SCIP index from rust-analyzer (`rust-analyzer scip .`) gives exact calls for Rust, from the CLI (`--scip`) and from the CI job. Checked on signalapp/libsignal (594 Rust files, index made in under four minutes): 8,399 of 8,435 function definitions in the index line up with diffmap's symbols; the rest are functions a macro writes.
+- rust-analyzer does not say which trait method an implementation stands for, so for such an index the "implements" links come from name matching: a changed implementation still shows who calls the trait method.
+- On libsignal, after a change to `DeviceId::new`: name matching finds no caller, the index finds 101.
+- `scripts/measure-accuracy.ts` scores name matching against an index (right, wrong, unconfirmed, missed per language). libsignal, Rust: 6,336 right, 5,304 wrong, 6,817 missed (precision 54%, recall 48%); many of the missed are `Type::new(...)` calls.
+- Fix: with an index, a variable on a function's first lines was taken for the function itself.
+
 ### 26. Swift and iOS code — DONE
 - Swift read badly for reasons of its own: methods are told apart by argument labels, properties hold code, files have no imports, and the bundled grammar was from 2023.
 - Names carry labels (`tableView(_:cellForRowAt:)`, `init(frame:)`): before, every `tableView` and `init` of a file was one symbol and a change in the second was shown on the first one's lines. Calls must fit the labels. A changed signature is one modified method.
@@ -103,7 +110,7 @@
 
 - The service against a real GitLab (sign-in, comments, approve, progress screen on a big project).
 - `ci/diffmap-index.gitlab-ci.yml` in a real pipeline.
-- Real `scip-java` (Java, Kotlin) and `scip-clang` indexes; so far only scip-typescript was run for real.
+- Real `scip-java` (Java, Kotlin) and `scip-clang` indexes; so far only scip-typescript and rust-analyzer were run for real.
 
 ---
 

@@ -1,3 +1,4 @@
+import { ScipCallGraph } from "../src/infrastructure/scip/scip-call-graph.js";
 import { describe, it, expect, afterEach } from "vitest";
 import { decodeScip, symbolName } from "../src/infrastructure/scip/scip-index.js";
 import { loadLanguageSupport, withIndex } from "../src/infrastructure/language-support.js";
@@ -35,8 +36,8 @@ describe("decodeScip", () => {
     const idx = decodeScip(index(doc("A.java", [occ(0, S("A#"), true), occ(3, S("B#run()."))]), doc("B.java", [info(S("B#"), S("P#"))])));
     expect(idx.documents.map((d) => d.path)).toEqual(["A.java", "B.java"]);
     expect(idx.documents[0].occurrences).toEqual([
-      { line: 0, symbol: S("A#"), roles: 1 },
-      { line: 3, symbol: S("B#run()."), roles: 0 },
+      { line: 0, symbol: S("A#"), roles: 1, column: 0, endColumn: 5 },
+      { line: 3, symbol: S("B#run()."), roles: 0, column: 0, endColumn: 5 },
     ]);
     expect(idx.documents[1].symbols).toEqual([{ symbol: S("B#"), implements: [S("P#")] }]);
   });
@@ -112,3 +113,99 @@ describe("exact calls from an index", () => {
     expect(r.exactness).toEqual({ exact: 3, total: 3 });
   });
 });
+
+describe("locals in an index", () => {
+  // An occurrence at given columns (the helper above always writes columns 0 to 5).
+  const occAt = (line: number, from: number, to: number, symbol: string, def = false) =>
+    bytes(2, [...bytes(1, [...varint(line), ...varint(from), ...varint(to)]), ...str(2, symbol), ...(def ? num(3, 1) : [])]);
+
+  it("a variable on a function's first lines is not the function; a nested function is", async () => {
+    const source = "def outer():\n    app = make()\n    def inner():\n        app.run()\n    inner()\n";
+    const scip = decodeScip(
+      index(
+        doc("a.py", [
+          occAt(0, 4, 9, "scip-python python . . a/outer().", true),
+          occAt(1, 4, 7, "local 1", true), // app
+          occAt(2, 8, 13, "local 2", true), // inner: indexers give nested functions a local symbol
+          occAt(3, 8, 11, "local 1"), // inner reads app
+          occAt(4, 4, 9, "local 2"), // outer calls inner
+        ]),
+      ),
+    );
+    const langs = await loadLanguageSupport();
+    const files = [{ path: "a.py", source }];
+    const ids = langs.listSymbols(files).get("a.py")!.map((s) => `a.py#${s.name}`);
+    const inner = ids.find((id) => id.endsWith("inner"))!;
+    const edges = new ScipCallGraph(scip, [], langs.listSymbols)
+      .build({ files, changedIds: ids, removed: [], depth: 1 })
+      .edges.map((e) => `${e.from} -> ${e.to}`);
+    expect(edges).toEqual([`a.py#outer -> ${inner}`]);
+  });
+});
+
+describe("a Rust index (rust-analyzer)", () => {
+  const occAt = (line: number, from: number, to: number, symbol: string, def = false) =>
+    bytes(2, [...bytes(1, [...varint(line), ...varint(from), ...varint(to)]), ...str(2, symbol), ...(def ? num(3, 1) : [])]);
+  const R = (desc: string) => `rust-analyzer cargo app 0.1.0 ${desc}`;
+
+  // `s` could be any Store: only the compiler knows `run` reaches Store::save and not Cache::save.
+  const source = [
+    "pub trait Store {", //                 1
+    "    fn save(&self);", //               2
+    "}", //                                 3
+    "pub struct Disk;", //                  4
+    "impl Store for Disk {", //             5
+    "    fn save(&self) {", //              6
+    "        let n = 1;", //                7
+    "    }", //                             8
+    "}", //                                 9
+    "pub struct Cache;", //                 10
+    "impl Cache {", //                      11
+    "    pub fn save(&self) {}", //         12
+    "}", //                                 13
+    "pub fn run<S: Store>(s: &S) {", //     14
+    "    s.save();", //                     15
+    "}", //                                 16
+    "",
+  ].join("\n");
+  // What rust-analyzer writes: definitions, the call in `run`, and no "implements" relationships.
+  const scip = decodeScip(
+    index(
+      doc("src/lib.rs", [
+        occAt(0, 10, 15, R("Store#"), true),
+        occAt(1, 7, 11, R("Store#save()."), true),
+        occAt(3, 11, 15, R("Disk#"), true),
+        occAt(4, 5, 10, R("Store#")),
+        occAt(4, 15, 19, R("Disk#")),
+        occAt(5, 7, 11, R("impl#[Disk][Store]save()."), true),
+        occAt(6, 12, 13, "local 1", true),
+        occAt(9, 11, 16, R("Cache#"), true),
+        occAt(10, 5, 10, R("Cache#")),
+        occAt(11, 11, 15, R("impl#[Cache]save()."), true),
+        occAt(13, 7, 10, R("run()."), true),
+        occAt(13, 14, 19, R("Store#")),
+        occAt(14, 6, 10, R("Store#save().")),
+      ]),
+    ),
+  );
+
+  it("links calls exactly and keeps the trait's implementations", async () => {
+    const langs = await loadLanguageSupport();
+    const files = [{ path: "src/lib.rs", source }];
+    const graph = withIndex(langs, scip).graphs.find((g) => g.supportedExtensions.includes(".rs"))!;
+    expect(graph.isExact?.("src/lib.rs")).toBe(true);
+    const id = (name: string) => `src/lib.rs#${name}`;
+    const edges = (changed: string) =>
+      graph
+        .build({ files, changedIds: [id(changed)], removed: [], depth: 1 })
+        .edges.map((e) => `${e.from.split("#")[1]} ${e.kind} ${e.to.split("#")[1]}`)
+        .sort();
+    // The trait's method changed: its caller, and the method that implements it. Not Cache.save.
+    expect(edges("Store.save")).toEqual(["Disk.save implements Store.save", "run calls Store.save"]);
+    // The implementation changed: who calls the trait method reaches it.
+    expect(edges("Disk.save")).toEqual(["Disk.save implements Store.save", "run calls Store.save"]);
+    // Same name, other type: nobody calls it.
+    expect(edges("Cache.save")).toEqual([]);
+  });
+});
+

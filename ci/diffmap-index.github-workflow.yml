@@ -28,6 +28,10 @@ jobs:
       # ── Java / Kotlin (Maven, Gradle or sbt): use instead of the steps above ──
       # - run: docker run --rm -v "$PWD:/sources" -w /sources sourcegraph/scip-java:latest scip-java index --output index.scip
 
+      # ── Rust (reads the Cargo workspace; no full build): use instead of the steps above ──
+      # - run: rustup component add rust-analyzer
+      # - run: rust-analyzer scip . --output index.scip
+
       # ── Several languages: write ts.scip, java.scip, ... then join them ──
       # - run: cat *.scip > index.scip
 

@@ -42,6 +42,20 @@ diffmap-index:
 #     paths: [java.scip]
 #     expire_in: 30 days
 
+# ── Rust ──────────────────────────────────────────────────────────────────────
+# rust-analyzer reads the Cargo workspace; it does not need a full build.
+# Rename to diffmap-index if this is your only language.
+# diffmap-index-rust:
+#   stage: diffmap
+#   image: rust:latest
+#   <<: *diffmap-rules
+#   script:
+#     - rustup component add rust-analyzer
+#     - rust-analyzer scip . --output rust.scip
+#   artifacts:
+#     paths: [rust.scip]
+#     expire_in: 30 days
+
 # ── C / C++ ───────────────────────────────────────────────────────────────────
 # scip-clang needs compile_commands.json from your build
 # (CMake: -DCMAKE_EXPORT_COMPILE_COMMANDS=ON). Use an image that can build your code.

@@ -26,7 +26,7 @@ There are two ways to use it:
 | C# | classes, records, structs, interfaces, enums, methods, constructors, properties with code | matched by name | — |
 | Scala | classes, objects, traits, functions | matched by name | — |
 | Go | functions, methods, structs, interfaces | matched by name | — |
-| Rust | functions, structs, enums, traits, impl blocks | matched by name | — |
+| Rust | functions, structs, enums, traits, impl blocks | matched by name | ✅ rust-analyzer |
 | C++ | functions, classes, structs, namespaces | matched by name | ✅ scip-clang |
 | C | functions, structs | matched by name | ✅ scip-clang |
 | Python | functions, classes | matched by name | — |
@@ -348,6 +348,7 @@ compiler:
 | TypeScript, JavaScript | [scip-typescript](https://github.com/sourcegraph/scip-typescript) | uses your `tsconfig.json`; `--infer-tsconfig` for plain JS |
 | Java, Kotlin | [scip-java](https://github.com/sourcegraph/scip-java) | Maven, Gradle or sbt |
 | C, C++ | [scip-clang](https://github.com/sourcegraph/scip-clang) | needs `compile_commands.json` from your build |
+| Rust | [rust-analyzer](https://rust-analyzer.github.io/) (`rust-analyzer scip .`) | part of the Rust toolchain (`rustup component add rust-analyzer`); reads the Cargo workspace, no full build. Trait implementations come from name matching, since this index does not list them |
 | Swift | none available yet | stays on name matching |
 
 - **Service:** diffmap finds the `diffmap-index` job (GitLab) or artifact (GitHub)

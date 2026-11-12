@@ -9,7 +9,7 @@ import { renderHtml } from "../html/render-html.js";
 function usage(): void {
   console.error(
     "Usage: diffmap <base>[..<head>] [--format json|html] [--depth N] [--scip index.scip]...\n\n" +
-      "  --scip FILE   exact calls from a SCIP index (scip-typescript, scip-java, scip-clang); repeatable\n\n" +
+      "  --scip FILE   exact calls from a SCIP index (scip-typescript, scip-java, scip-clang, rust-analyzer); repeatable\n\n" +
       "Examples:\n  diffmap main\n  diffmap main..HEAD\n  diffmap main --format html > report.html\n  diffmap main --scip index.scip --format html > report.html"
   );
 }
