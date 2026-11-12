@@ -142,3 +142,70 @@ describe("locals in an index", () => {
     expect(edges).toEqual([`a.py#outer -> ${inner}`]);
   });
 });
+
+describe("a Rust index (rust-analyzer)", () => {
+  const occAt = (line: number, from: number, to: number, symbol: string, def = false) =>
+    bytes(2, [...bytes(1, [...varint(line), ...varint(from), ...varint(to)]), ...str(2, symbol), ...(def ? num(3, 1) : [])]);
+  const R = (desc: string) => `rust-analyzer cargo app 0.1.0 ${desc}`;
+
+  // `s` could be any Store: only the compiler knows `run` reaches Store::save and not Cache::save.
+  const source = [
+    "pub trait Store {", //                 1
+    "    fn save(&self);", //               2
+    "}", //                                 3
+    "pub struct Disk;", //                  4
+    "impl Store for Disk {", //             5
+    "    fn save(&self) {", //              6
+    "        let n = 1;", //                7
+    "    }", //                             8
+    "}", //                                 9
+    "pub struct Cache;", //                 10
+    "impl Cache {", //                      11
+    "    pub fn save(&self) {}", //         12
+    "}", //                                 13
+    "pub fn run<S: Store>(s: &S) {", //     14
+    "    s.save();", //                     15
+    "}", //                                 16
+    "",
+  ].join("\n");
+  // What rust-analyzer writes: definitions, the call in `run`, and no "implements" relationships.
+  const scip = decodeScip(
+    index(
+      doc("src/lib.rs", [
+        occAt(0, 10, 15, R("Store#"), true),
+        occAt(1, 7, 11, R("Store#save()."), true),
+        occAt(3, 11, 15, R("Disk#"), true),
+        occAt(4, 5, 10, R("Store#")),
+        occAt(4, 15, 19, R("Disk#")),
+        occAt(5, 7, 11, R("impl#[Disk][Store]save()."), true),
+        occAt(6, 12, 13, "local 1", true),
+        occAt(9, 11, 16, R("Cache#"), true),
+        occAt(10, 5, 10, R("Cache#")),
+        occAt(11, 11, 15, R("impl#[Cache]save()."), true),
+        occAt(13, 7, 10, R("run()."), true),
+        occAt(13, 14, 19, R("Store#")),
+        occAt(14, 6, 10, R("Store#save().")),
+      ]),
+    ),
+  );
+
+  it("links calls exactly and keeps the trait's implementations", async () => {
+    const langs = await loadLanguageSupport();
+    const files = [{ path: "src/lib.rs", source }];
+    const graph = withIndex(langs, scip).graphs.find((g) => g.supportedExtensions.includes(".rs"))!;
+    expect(graph.isExact?.("src/lib.rs")).toBe(true);
+    const id = (name: string) => `src/lib.rs#${name}`;
+    const edges = (changed: string) =>
+      graph
+        .build({ files, changedIds: [id(changed)], removed: [], depth: 1 })
+        .edges.map((e) => `${e.from.split("#")[1]} ${e.kind} ${e.to.split("#")[1]}`)
+        .sort();
+    // The trait's method changed: its caller, and the method that implements it. Not Cache.save.
+    expect(edges("Store.save")).toEqual(["Disk.save implements Store.save", "run calls Store.save"]);
+    // The implementation changed: who calls the trait method reaches it.
+    expect(edges("Disk.save")).toEqual(["Disk.save implements Store.save", "run calls Store.save"]);
+    // Same name, other type: nobody calls it.
+    expect(edges("Cache.save")).toEqual([]);
+  });
+});
+

@@ -125,6 +125,27 @@ export class ScipCallGraph implements CallGraphPort {
         }
       }
     }
+    // ── "implements" links the index does not carry ──
+    // Some indexers (rust-analyzer) say which method a call reaches but not which trait
+    // method an implementation stands for. For such a language those links come from the
+    // usual builders, so a changed implementation still shows who calls the trait method.
+    const extOf = (path: string) => extname(path).toLowerCase();
+    const withImplements = new Set(mine.filter((f) => docs.get(f.path)!.symbols.some((s) => s.implements.length > 0)).map((f) => extOf(f.path)));
+    const lacking = new Set(mine.map((f) => extOf(f.path)).filter((ext) => !withImplements.has(ext)));
+    // Each usual builder runs at most once, here or for the files outside the index (below).
+    const built = new Map<CallGraphPort, CallGraphResult>();
+    const usual = (fb: CallGraphPort): CallGraphResult => {
+      const files = input.files.filter((f) => fb.supportedExtensions.includes(extOf(f.path)));
+      return built.get(fb) ?? built.set(fb, fb.build({ ...input, files })).get(fb)!;
+    };
+    for (const fb of this.fallbacks) {
+      // A builder that is exact itself (TypeScript) has nothing to add to an index.
+      if (fb.isExact || !fb.supportedExtensions.some((ext) => lacking.has(ext))) continue;
+      for (const e of usual(fb).edges) {
+        if (e.kind !== "implements" || !meta.has(e.from) || !meta.has(e.to) || !lacking.has(extOf(meta.get(e.from)!.file))) continue;
+        for (const site of e.sites ?? []) collector.add(e.from, e.to, e.kind, site.line, site.text);
+      }
+    }
     const exact = walkNeighbourhood({ meta, linesOf, calls: collector.calls, changedIds: input.changedIds, depth: input.depth });
 
     // ── everything else from the usual builders ──
@@ -137,7 +158,7 @@ export class ScipCallGraph implements CallGraphPort {
     for (const fb of this.fallbacks) {
       const files = input.files.filter((f) => fb.supportedExtensions.includes(extname(f.path).toLowerCase()));
       if (!files.some((f) => restPaths.has(f.path)) && input.removed.length === 0) continue;
-      const r = fb.build({ ...input, files });
+      const r = usual(fb);
       const byId = new Map(r.nodes.map((n) => [n.id, n]));
       for (const e of r.edges) {
         const fromFile = byId.get(e.from)?.file ?? e.from.split("#")[0];
