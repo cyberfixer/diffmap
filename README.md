@@ -205,6 +205,7 @@ For a second host, run it again with another name, port, volume and settings fil
 | `DATA_DIR` | Where diffmap keeps its files (default `/data`; keep it on a volume) |
 | `CACHE_DIR` | Where project code is kept (default `$DATA_DIR/repos`) |
 | `CACHE_MAX_GB` | Disk limit for project code (default `15`, `0` = no limit). Above it, projects not opened for the longest time are removed; they download again when next opened |
+| `ADMIN_USERS` | Usernames (comma-separated) who may open the [dashboard](#dashboard) at `/dashboard`. Empty by default: nobody can |
 | `ANALYSIS_WORKERS` | Reviews analysed at the same time (default `2`; about one per CPU core is fine if memory allows) |
 | `ANALYSIS_MEMORY_MB` | Memory limit of each analysis (default `2048`). The container needs at most about `ANALYSIS_WORKERS` × this + 200 MB |
 | `INDEX_JOB`, `INDEX_ARTIFACT` | CI job (GitLab) or Actions artifact (GitHub) with the exact index (default `diffmap-index`, `index.scip`) |
@@ -358,6 +359,18 @@ compiler:
 - **CLI:** `--scip index.scip`. Several index files can be passed, or joined with
   `cat a.scip b.scip > index.scip`.
 - An index also says which classes implement which interfaces (listed as "implements" among the usages).
+
+### Dashboard
+
+`/dashboard` shows what the service is doing, for the people listed in `ADMIN_USERS`:
+
+- **Now:** the reviews being downloaded or analysed, their step, and how many are waiting for a free slot (`ANALYSIS_WORKERS`).
+- **Latest analyses:** the last 50 with how long getting the code and analysing took, whether a CI index gave exact calls, and the error when one failed.
+- **Numbers since the start:** analyses done and failed, the typical time to a map, maps opened (and how many needed no new analysis), memory in use, people signed in.
+- **Code on disk:** the size of each project's copy against `CACHE_MAX_GB`.
+- **Log:** the service's latest log lines.
+
+It refreshes every five seconds. It names projects and review titles from everyone's reviews, which is why it is not open to every signed-in user. Its numbers start again when the service restarts.
 
 ### Swift and iOS
 

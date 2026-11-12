@@ -17,6 +17,11 @@ export class WorkerAnalyzer {
     private readonly memoryMb = 2048,
   ) {}
 
+  /** How busy the workers are: analyses running, analyses waiting for a free one, and the limits. */
+  load(): { running: number; waiting: number; max: number; memoryMb: number } {
+    return { running: this.running, waiting: this.waiting.length, max: this.max, memoryMb: this.memoryMb };
+  }
+
   async analyze(gitDir: string, base: string, head: string, index?: Uint8Array): Promise<AnalysisResult> {
     if (this.running >= this.max) await new Promise<void>((r) => this.waiting.push(r));
     this.running++;

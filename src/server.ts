@@ -25,6 +25,8 @@ const sessions = new SessionStore();
 const analyzer = new WorkerAnalyzer(config.analysisWorkers, config.analysisMemoryMb);
 setInterval(() => sessions.sweep(), 3600_000).unref();
 
+const repos = new GitRepoCache(config.cacheDir, { maxBytes: config.cacheMaxBytes });
+
 const app = createApp({
   config,
   sessions,
@@ -50,9 +52,9 @@ const app = createApp({
     config.codeHost === "github"
       ? new GitHubClient(config.hostUrl, token, fetch, { name: config.indexJob, file: config.indexArtifact })
       : new GitLabClient(config.hostUrl, token, fetch, { name: config.indexJob, artifact: config.indexArtifact }),
-  review: new ReviewMergeRequestUseCase(new GitRepoCache(config.cacheDir, { maxBytes: config.cacheMaxBytes }), (gitDir, base, head, index) =>
-    analyzer.analyze(gitDir, base, head, index),
-  ),
+  review: new ReviewMergeRequestUseCase(repos, (gitDir, base, head, index) => analyzer.analyze(gitDir, base, head, index)),
+  workers: () => analyzer.load(),
+  storage: () => repos.usage(),
   viewed: new FileViewedStore(`${config.dataDir}/viewed.json`),
   highlighters: (await loadLanguageSupport()).highlighters,
 });

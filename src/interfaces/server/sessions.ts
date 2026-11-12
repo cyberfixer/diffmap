@@ -44,6 +44,11 @@ export class SessionStore {
     return s;
   }
 
+  /** How many people are signed in (sessions not yet forgotten). */
+  get size(): number {
+    return this.sessions.size;
+  }
+
   delete(id: string | undefined): void {
     if (id) this.sessions.delete(id);
   }
