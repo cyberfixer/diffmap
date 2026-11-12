@@ -13,6 +13,9 @@ export const ROLE_IMPORT = 2;
 
 export interface ScipOccurrence {
   line: number; // 0-based, as in SCIP
+  /** Where on the line it is written (0-based, end not included), when it sits on one line. */
+  column?: number;
+  endColumn?: number;
   symbol: string;
   roles: number;
 }
@@ -106,7 +109,10 @@ function readOccurrence(r: Reader): ScipOccurrence | null {
     else if (f === 3 && w === 0) roles = r.varint();
     else r.skip(w);
   }
-  return range.length >= 3 && symbol ? { line: range[0], symbol, roles } : null;
+  if (range.length < 3 || !symbol) return null;
+  // [line, start, end] on one line, or [line, start, endLine, end].
+  const endColumn = range.length === 3 ? range[2] : range[2] === range[0] ? range[3] : undefined;
+  return { line: range[0], symbol, roles, ...(endColumn !== undefined ? { column: range[1], endColumn } : {}) };
 }
 
 function readSymbol(r: Reader): ScipSymbol {

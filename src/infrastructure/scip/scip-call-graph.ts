@@ -89,6 +89,10 @@ export class ScipCallGraph implements CallGraphPort {
         const sym = innermostAtLine(symbolsIn.get(f.path) ?? [], line);
         if (!sym) continue;
         const header = line - sym.range.start <= 3; // the name sits in the first lines (after decorators)
+        // A local has no name in SCIP; read it from the code, so that a variable or
+        // parameter on the symbol's first lines is not taken for the symbol itself.
+        const written = o.endColumn === undefined ? undefined : linesOf.get(f.path)![o.line]?.slice(o.column, o.endColumn);
+        if (isLocal(o.symbol) && written !== undefined && /^[\x20-\x7e]*$/.test(linesOf.get(f.path)![o.line]) && written !== simple(sym.name)) continue;
         const name = isLocal(o.symbol) ? null : symbolName(o.symbol);
         // Only the symbol's own name counts, not a field or variable defined inside it.
         // Locals have no name in SCIP: accept them on the symbol's first lines.

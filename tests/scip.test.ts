@@ -1,3 +1,4 @@
+import { ScipCallGraph } from "../src/infrastructure/scip/scip-call-graph.js";
 import { describe, it, expect, afterEach } from "vitest";
 import { decodeScip, symbolName } from "../src/infrastructure/scip/scip-index.js";
 import { loadLanguageSupport, withIndex } from "../src/infrastructure/language-support.js";
@@ -35,8 +36,8 @@ describe("decodeScip", () => {
     const idx = decodeScip(index(doc("A.java", [occ(0, S("A#"), true), occ(3, S("B#run()."))]), doc("B.java", [info(S("B#"), S("P#"))])));
     expect(idx.documents.map((d) => d.path)).toEqual(["A.java", "B.java"]);
     expect(idx.documents[0].occurrences).toEqual([
-      { line: 0, symbol: S("A#"), roles: 1 },
-      { line: 3, symbol: S("B#run()."), roles: 0 },
+      { line: 0, symbol: S("A#"), roles: 1, column: 0, endColumn: 5 },
+      { line: 3, symbol: S("B#run()."), roles: 0, column: 0, endColumn: 5 },
     ]);
     expect(idx.documents[1].symbols).toEqual([{ symbol: S("B#"), implements: [S("P#")] }]);
   });
@@ -110,5 +111,34 @@ describe("exact calls from an index", () => {
     expect(into(r, "P.java#P.update")).toEqual(["implements A.java#A.update"]);
     expect(r.edges.find((e) => e.to === "A.java#A.update")!.sites).toEqual([{ line: 4, text: "    a.update());" }]);
     expect(r.exactness).toEqual({ exact: 3, total: 3 });
+  });
+});
+
+describe("locals in an index", () => {
+  // An occurrence at given columns (the helper above always writes columns 0 to 5).
+  const occAt = (line: number, from: number, to: number, symbol: string, def = false) =>
+    bytes(2, [...bytes(1, [...varint(line), ...varint(from), ...varint(to)]), ...str(2, symbol), ...(def ? num(3, 1) : [])]);
+
+  it("a variable on a function's first lines is not the function; a nested function is", async () => {
+    const source = "def outer():\n    app = make()\n    def inner():\n        app.run()\n    inner()\n";
+    const scip = decodeScip(
+      index(
+        doc("a.py", [
+          occAt(0, 4, 9, "scip-python python . . a/outer().", true),
+          occAt(1, 4, 7, "local 1", true), // app
+          occAt(2, 8, 13, "local 2", true), // inner: indexers give nested functions a local symbol
+          occAt(3, 8, 11, "local 1"), // inner reads app
+          occAt(4, 4, 9, "local 2"), // outer calls inner
+        ]),
+      ),
+    );
+    const langs = await loadLanguageSupport();
+    const files = [{ path: "a.py", source }];
+    const ids = langs.listSymbols(files).get("a.py")!.map((s) => `a.py#${s.name}`);
+    const inner = ids.find((id) => id.endsWith("inner"))!;
+    const edges = new ScipCallGraph(scip, [], langs.listSymbols)
+      .build({ files, changedIds: ids, removed: [], depth: 1 })
+      .edges.map((e) => `${e.from} -> ${e.to}`);
+    expect(edges).toEqual([`a.py#outer -> ${inner}`]);
   });
 });
