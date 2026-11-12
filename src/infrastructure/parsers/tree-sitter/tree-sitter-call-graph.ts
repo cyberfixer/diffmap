@@ -2,18 +2,59 @@ import type { CallGraphInput, CallGraphPort, CallGraphResult } from "../../../ap
 import { CallCollector, walkNeighbourhood } from "../../../application/call-graph-walk.js";
 import type { GraphNode } from "../../../domain/graph.js";
 import type { FoundCall, TreeSitterEngine, TypeParents } from "./engine.js";
+import type { LanguageSpec, Param } from "./languages.js";
+import { posix } from "node:path";
 import { Visibility, typeOfVariable } from "./visibility.js";
 
 /** Above this many same-named targets a call is too ambiguous to draw (think `get`, `run`). */
 const MAX_TARGETS = 5;
+/**
+ * ...unless they are all methods of one type: overloads that differ by what only a compiler
+ * sees (Swift's `request(_: URL)` and `request(_: URLRequest)`, each its own symbol). The type is
+ * not in doubt then, so a few more are drawn.
+ */
+const MAX_OVERLOADS = 8;
 
-const simple = (name: string): string => name.split(".").pop()!;
+/** Swift's argument labels at the end of a name: "(_:cache:)". Nothing else in parentheses (C++ `operator()`). */
+const LABELS = /\(((?:[^\s():]+:)+)\)$/;
+/** Last part of a qualified name, as written: "Svc.load(_:cache:)" -> "load(_:cache:)". */
+const member = (name: string): string => name.split(".").pop()!;
+/** The same without Swift's argument labels, which is what a call writes: "Svc.load(_:cache:)" -> "load". */
+const simple = (name: string): string => member(name).replace(LABELS, "");
 const owner = (name: string): string => name.split(".").slice(0, -1).join(".");
 const ownerSimple = (name: string): string => simple(owner(name) || "");
 
+/** Swift: the argument labels in a name: "load(_:cache:)" -> ["_", "cache"]; [] for a plain name. */
+const labelsOf = (name: string): string[] => LABELS.exec(member(name))?.[1].split(":").filter(Boolean) ?? [];
+
+/**
+ * Swift: can a function with these parameters take a call's arguments?
+ * Each argument goes to the next parameter with its label; only parameters with a
+ * default (or variadic ones) may be passed over. Trailing closures then fill
+ * parameters that can take a closure, first those without a default; any other
+ * parameter left must have one.
+ */
+export function acceptsLabels(params: Param[], labels: string[], closures = 0): boolean {
+  const skippable = (p: Param) => p.optional || p.variadic;
+  let at = 0;
+  for (const label of labels) {
+    if (params[at - 1]?.variadic && label === "_") continue; // one more value for f(_ xs: Int...), isAny(of: a, b)
+    while (at < params.length && params[at].label !== label) {
+      if (!skippable(params[at])) return false;
+      at++;
+    }
+    if (at === params.length) return false;
+    at++;
+  }
+  const rest = params.slice(at);
+  const required = rest.filter((p) => !skippable(p));
+  if (required.length > closures || required.some((p) => !p.closure)) return false;
+  return closures - required.length <= rest.filter((p) => skippable(p) && p.closure).length;
+}
+
 export type LinkOutcome = "external" | "libraryType" | "unreachable" | "one" | "several" | "tooMany";
 
-/** One call and how it was linked (for measuring the matching rules). */
+/** One call (or, with `use`, a property read or a function passed by name) and how it was linked (for measuring the matching rules). */
 export interface LinkedCall extends FoundCall {
   file: string;
   outcome: LinkOutcome;
@@ -34,6 +75,8 @@ export interface LinkStats {
   /** Made on a variable whose type the repo doesn't define (String, List…): left out. */
   libraryType: number;
   implementsLinks: number;
+  /** Uses that are not calls and were linked: property reads, functions passed by name (Swift). */
+  uses: number;
 }
 
 /**
@@ -43,6 +86,11 @@ export interface LinkStats {
  * - otherwise x in the same file, then in files it imports or shares a folder with.
  * If nothing is reachable, a call is linked only when the name is unique in the repo.
  * No type checking, so it can still miss or over-link; a SCIP index makes it exact.
+ *
+ * Swift (see its rules in languages.ts): a plain `x()` in a type is the type's own
+ * `x` first; `super.x()` is a parent's; `Svc(a: 1)` also links to `Svc.init(a:)`;
+ * same-named methods are told apart by their argument labels; `#selector(x)`,
+ * `action: x` and reads of properties with code count as uses.
  */
 export class TreeSitterCallGraph implements CallGraphPort {
   readonly supportedExtensions: readonly string[];
@@ -66,11 +114,17 @@ export class TreeSitterCallGraph implements CallGraphPort {
     const returns = new Map<string, string>(); // symbol id -> declared return type
     const params = new Map<string, [number, number]>(); // symbol id -> [min, max] arguments
 
+    const properties = new Set<string>(); // ids of properties with code
+    const statics = new Set<string>(); // ids of static functions
+    const signatures = new Map<string, Param[]>(); // symbol id -> its parameters one by one (Swift)
     for (const f of files) {
-      const { symbols, calls: found, parents, returns: rets, params: ps } = this.engine.outline(f.path, f.source);
+      const { symbols, calls: found, parents, returns: rets, params: ps, properties: props, statics: sts, signatures: sigs } = this.engine.outline(f.path, f.source);
+      for (const name of sts) statics.add(`${f.path}#${name}`);
+      for (const [name, sig] of Object.entries(sigs)) signatures.set(`${f.path}#${name}`, sig);
       for (const [name, range] of Object.entries(ps)) params.set(`${f.path}#${name}`, range);
       for (const p of parents) typeParents.push({ file: f.path, ...p });
       for (const [name, type] of Object.entries(rets)) returns.set(`${f.path}#${name}`, type);
+      for (const name of props) properties.add(`${f.path}#${name}`);
       linesOf.set(f.path, f.source.split("\n").map((l) => l.replace(/\r$/, "")));
       for (const s of symbols) {
         const id = `${f.path}#${s.name}`;
@@ -81,8 +135,14 @@ export class TreeSitterCallGraph implements CallGraphPort {
       }
       for (const c of found) calls.push({ file: f.path, ...c });
     }
-    const visibility = new Visibility(files);
-    const scope = new TypeScope(meta, linesOf, visibility, typeParents, returns);
+    // A second look (Swift): reads of properties with code, and functions passed by name.
+    const names = { properties: new Set<string>(), functions: new Set<string>() };
+    for (const n of meta.values()) {
+      if (properties.has(n.id)) names.properties.add(simple(n.name));
+      else if (!TYPE_KINDS.has(n.kind)) names.functions.add(simple(n.name));
+    }
+    const visibility = new Visibility(files, (path) => !!this.engine.spec(path)?.moduleScope);
+    const scope = new TypeScope(meta, linesOf, visibility, typeParents, returns, properties, this.engine.knownParents, (file) => this.engine.spec(file));
 
     const removedByName = new Map<string, string[]>();
     for (const r of removed) {
@@ -90,14 +150,38 @@ export class TreeSitterCallGraph implements CallGraphPort {
       removedByName.set(key, [...(removedByName.get(key) ?? []), r.id]);
     }
 
-    const stats: LinkStats = { calls: 0, external: 0, one: 0, several: 0, tooMany: 0, unreachable: 0, libraryType: 0, implementsLinks: 0 };
+    const stats: LinkStats = { calls: 0, external: 0, one: 0, several: 0, tooMany: 0, unreachable: 0, libraryType: 0, implementsLinks: 0, uses: 0 };
     const collector = new CallCollector();
-    for (const c of calls) {
+    const node = (id: string) => meta.get(id)!;
+    const linkOne = (c: FoundCall & { file: string }): void => {
       const from = `${c.file}#${c.from}`;
       const text = linesOf.get(c.file)?.[c.line - 1] ?? "";
-      const all = (byName.get(c.name) ?? []).filter((id) => id !== from);
-      const narrowed = this.narrow(all, c, from, meta, scope, visibility);
-      let targets = narrowed ?? [];
+      const spec = this.engine.spec(c.file);
+      const named = (byName.get(c.name) ?? []).filter((id) => id !== from);
+
+      // Not a call: a property read, or a function passed by name. Linked only when it is clear whose.
+      if (c.use) {
+        const all = named.filter((id) => (c.use === "read" ? properties.has(id) : !TYPE_KINDS.has(node(id).kind) && !properties.has(id)));
+        let targets = this.narrowUse(all, c, from, meta, scope, visibility);
+        if (c.labels) targets = targets.filter((id) => labelsOf(node(id).name).join(":") === c.labels!.join(":"));
+        if (targets.length > MAX_TARGETS) targets = [];
+        if (targets.length) stats.uses++;
+        onCall?.({ ...c, outcome: targets.length === 0 ? "unreachable" : targets.length === 1 ? "one" : "several", targets });
+        for (const to of targets) collector.add(from, to, "calls", c.line, text);
+        return;
+      }
+
+      const all = named;
+      // Swift: the argument labels are part of a function's name, so load(_:) is no candidate for
+      // load(1, cache: true); and a property is called only as a closure, which takes no labels.
+      const labelled = c.labels?.some((x) => x !== "_");
+      const fitting = !c.labels
+        ? all
+        : all.filter((id) => (signatures.has(id) ? acceptsLabels(signatures.get(id)!, c.labels!, c.closures) : !(labelled && properties.has(id))));
+      const narrowed = this.narrow(fitting, c, from, meta, scope, visibility, statics, spec);
+      let targets = narrowed?.ids ?? [];
+      // A property is not called on a guess by name.
+      if (narrowed?.unsure) targets = targets.filter((id) => !properties.has(id));
       // Several left: keep those that accept this many arguments (if any do).
       if (targets.length > 1 && c.args !== undefined) {
         const fits = targets.filter((id) => {
@@ -106,24 +190,38 @@ export class TreeSitterCallGraph implements CallGraphPort {
         });
         if (fits.length) targets = fits;
       }
-      // Several left (two classes named Order): the one the file imports.
-      targets = visibility.preferImported(c.file, targets, (id) => meta.get(id)!.file);
+      // Several left (two classes named Order): the one the file imports. In a module (Swift), of
+      // top-level names the nearest; methods of one type in several files are overloads, all kept.
+      targets = visibility.preferImported(c.file, targets, (id) => node(id).file, targets.every((id) => scope.ownerOf(id) === ""));
+      // Found by name alone among everything the module can see: trusted only when one is left.
+      if (narrowed?.unsure && targets.length > 1) targets = [];
+      const oneType = targets.length > MAX_TARGETS && scope.ownerOf(targets[0]) !== "" && targets.every((id) => scope.ownerOf(id) === scope.ownerOf(targets[0]));
+      const limit = oneType ? MAX_OVERLOADS : MAX_TARGETS;
       const outcome: LinkOutcome =
         all.length === 0 ? "external"
         : narrowed === null ? "libraryType"
         : targets.length === 0 ? "unreachable"
         : targets.length === 1 ? "one"
-        : targets.length <= MAX_TARGETS ? "several"
+        : targets.length <= limit ? "several"
         : "tooMany";
       stats.calls++;
       stats[outcome]++;
       onCall?.({ ...c, outcome, targets });
-      if (targets.length > 0 && targets.length <= MAX_TARGETS) {
+      if (targets.length > 0 && targets.length <= limit) {
         for (const to of targets) collector.add(from, to, "calls", c.line, text);
+        // Swift: `Svc(a: 1)` runs `Svc.init(a:)` when the type writes one out.
+        for (const to of this.constructorsOf(targets, c, from, spec?.constructorName, scope, meta, signatures, visibility)) {
+          collector.add(from, to, "calls", c.line, text);
+        }
       } else if (all.length === 0) {
         // Nothing by that name exists any more: probably a call to removed code.
         for (const to of removedByName.get(c.name) ?? []) collector.add(from, to, "calls-removed", c.line, text);
       }
+    };
+    for (const c of calls) linkOne(c);
+    // The second look, one file at a time: a big repo has many more uses than calls, too many to keep.
+    if (names.properties.size || names.functions.size) {
+      for (const f of files) for (const u of this.engine.uses(f.path, f.source, names)) linkOne({ file: f.path, ...u });
     }
     stats.implementsLinks = this.linkImplementations(typeParents, meta, linesOf, scope, visibility, collector);
     return { meta, linesOf, collector, stats };
@@ -156,10 +254,10 @@ export class TreeSitterCallGraph implements CallGraphPort {
         (m) => owner(m.name) === t.type && (m.file === t.file || visibility.canSee(m.file, t.file) || visibility.canSee(t.file, m.file)),
       );
       for (const m of own) {
-        const name = simple(m.name);
-        if (CONSTRUCTORS.has(name) || name === simple(t.type)) continue;
+        const name = member(m.name); // with Swift's labels: save(_:) implements save(_:), not save(_:force:)
+        if (CONSTRUCTORS.has(simple(m.name)) || simple(m.name) === simple(t.type)) continue;
         for (const a of ancestors) {
-          const candidates = (methodsOf.get(a) ?? []).filter((p) => simple(p.name) === name && p.id !== m.id);
+          const candidates = (methodsOf.get(a) ?? []).filter((p) => member(p.name) === name && p.id !== m.id);
           const visible = candidates.filter((p) => visibility.canSee(m.file, p.file));
           for (const p of visible.length ? visible : candidates.length === 1 ? candidates : []) {
             const key = `${m.id}>${p.id}`;
@@ -174,60 +272,199 @@ export class TreeSitterCallGraph implements CallGraphPort {
     return added;
   }
 
-  /** Keep only the targets the call can reach (see the class comment); null for a call on a library type. */
-  private narrow(
+  /**
+   * A property read or a function passed by name: whose is it? Only clear cases
+   * are linked, because a name alone says little (`title`, `count`):
+   * - `header`, `self.header`: the calling type's own member, or one it inherits;
+   *   then a global the file can see. Not when the code declares a local of that name.
+   * - `viewModel.title`: title of viewModel's type, when that type is written down.
+   */
+  private narrowUse(
     all: string[],
     c: FoundCall & { file: string },
     from: string,
     meta: Map<string, GraphNode>,
     scope: TypeScope,
     visibility: Visibility,
-  ): string[] | null {
-    if (all.length === 0) return [];
+  ): string[] {
+    const caller = meta.get(from);
+    if (all.length === 0 || !caller) return [];
+    const node = (id: string) => meta.get(id)!;
+    const cls = TYPE_KINDS.has(caller.kind) ? caller.name : owner(caller.name);
+    const own = () => all.filter((id) => scope.ownerOf(id) === cls && (node(id).file === c.file || visibility.canSee(c.file, node(id).file)));
+
+    if (c.receiver === "super") return cls ? scope.inAncestors(all, simple(cls), c.file) : [];
+    if (c.receiver === "" || c.receiver === "self") {
+      if (c.receiver === "" && scope.declaresLocal(caller, c.name)) return [];
+      if (cls) {
+        const mine = own();
+        if (mine.length) return mine;
+        // The type's own plain stored property of that name is what is meant.
+        if (scope.declaresField(caller.file, cls, c.name)) return [];
+        const inherited = scope.inAncestors(all, simple(cls), c.file);
+        if (inherited.length) return inherited;
+      }
+      if (c.receiver === "self") return [];
+      // A global: `let formatter: DateFormatter = { ... }()`, or a free function passed by name.
+      const globals = all.filter((id) => scope.ownerOf(id) === "");
+      const local = globals.filter((id) => node(id).file === c.file);
+      return local.length ? local : globals.filter((id) => visibility.canSee(c.file, node(id).file));
+    }
+    const type = scope.typeOfExpr(c.receiver, caller);
+    if (!type || !scope.isRepoType(type)) return [];
+    const typed = scope.ofExactType(all.filter((id) => scope.ownerSimpleOf(id) === type), type);
+    // Several types of that name nested in different places (generated models): no telling which.
+    if (new Set(typed.map((id) => scope.ownerOf(id))).size > 1) return [];
+    return typed.length ? typed : scope.inAncestors(all, type, c.file);
+  }
+
+  /**
+   * Swift: when a call was linked to a type (`Svc(a: 1)`), the constructors that
+   * type writes out and that take these argument labels (`Svc.init(a:)`), also from extensions.
+   */
+  private constructorsOf(
+    targets: string[],
+    c: FoundCall & { file: string },
+    from: string,
+    constructorName: string | undefined,
+    scope: TypeScope,
+    meta: Map<string, GraphNode>,
+    signatures: Map<string, Param[]>,
+    visibility: Visibility,
+  ): string[] {
+    if (!constructorName || !c.labels || !targets.every((id) => TYPE_KINDS.has(meta.get(id)!.kind))) return [];
+    const out: string[] = [];
+    for (const type of targets.map((id) => meta.get(id)!)) {
+      for (const id of scope.membersOf(type.name, constructorName)) {
+        const init = meta.get(id)!;
+        if (id === from) continue;
+        if (init.file !== type.file && !visibility.canSee(type.file, init.file) && !visibility.canSee(init.file, type.file)) continue;
+        if (acceptsLabels(signatures.get(id) ?? [], c.labels, c.closures)) out.push(id);
+      }
+    }
+    return out.length <= MAX_CONSTRUCTORS ? out : [];
+  }
+
+  /**
+   * Keep only the targets the call can reach (see the class comment); null for a call on a library type.
+   * `unsure`: found by name alone, to be trusted only when exactly one target is left.
+   */
+  private narrow(
+    candidates: string[],
+    c: FoundCall & { file: string },
+    from: string,
+    meta: Map<string, GraphNode>,
+    scope: TypeScope,
+    visibility: Visibility,
+    statics: ReadonlySet<string>,
+    spec?: LanguageSpec,
+  ): { ids: string[]; unsure?: boolean } | null {
+    if (candidates.length === 0) return { ids: [] };
+    let all = candidates;
     const node = (id: string) => meta.get(id)!;
     const caller = meta.get(from);
     const receiver = caller ? scope.plainReceiver(c.receiver, caller) : c.receiver;
+    // The type the calling code is in: the owner of a method, or the type itself (a property's initial value).
+    const cls = !caller ? "" : TYPE_KINDS.has(caller.kind) && spec?.implicitSelf ? caller.name : owner(caller.name);
+    // Members of that type, also from its extensions in other files of the module.
+    const ownMembers = () =>
+      all.filter((id) => scope.ownerOf(id) === cls && (node(id).file === c.file || visibility.canSee(c.file, node(id).file)));
+
+    // super.x(): a parent's x, never the type's own or a sibling's. No parent in the repo has it: a library class.
+    if (receiver === "super") {
+      const inherited = cls ? scope.inAncestors(all, simple(cls), c.file) : [];
+      return inherited.length ? { ids: inherited } : null;
+    }
+
+    // .make(1): a static member of a type only the compiler knows; `.init(x)` could be any type's.
+    if (receiver === ".") {
+      // ...unless the type is written nearby: let tab: Tab = .init(1), tab = .next(), -> Tab { .init(1) }
+      const base = c.context && caller ? scope.typeOfExpr(c.context, caller) : null;
+      if (base) {
+        if (!scope.isRepoType(base)) return null;
+        const typed = scope.ofExactType(all.filter((id) => scope.ownerSimpleOf(id) === base), base);
+        return { ids: typed.length ? typed : scope.inAncestors(all, base, c.file) };
+      }
+      return { ids: c.name === spec?.constructorName ? [] : all.filter((id) => statics.has(id)), unsure: true };
+    }
 
     // self.x() / this.x(): the caller's own class (or, if it isn't there, an inherited one it can see)
     if (receiver === "self" && caller) {
-      const cls = owner(caller.name);
-      const own = all.filter((id) => node(id).file === c.file && owner(node(id).name) === cls);
-      if (own.length) return own;
+      const own = spec?.implicitSelf ? ownMembers() : all.filter((id) => node(id).file === c.file && scope.ownerOf(id) === cls);
+      if (own.length) return { ids: own };
       const inherited = scope.inAncestors(all, simple(cls), c.file);
-      if (inherited.length) return inherited;
-      return all.filter((id) => owner(node(id).name) !== "" && visibility.canSee(c.file, node(id).file));
+      if (inherited.length) return { ids: inherited };
+      // self.init(...) with no init written out is the type's own (memberwise) one, not another type's.
+      if (c.name === spec?.constructorName) return { ids: [] };
+      const others = all.filter((id) => scope.ownerOf(id) !== "" && visibility.canSee(c.file, node(id).file));
+      return { ids: others, unsure: spec?.moduleScope };
+    }
+
+    // Swift: a plain x() inside a type is the type's own x, or one it inherits, before anything else.
+    if (spec?.implicitSelf && receiver === "" && caller) {
+      // A closure the code holds itself: completion(result), onDone().
+      if (scope.declaresLocal(caller, c.name, true)) return { ids: [] };
+      if (cls) {
+        const own = ownMembers();
+        if (own.length) return { ids: own };
+        if (scope.declaresField(caller.file, cls, c.name)) return { ids: [] };
+        const inherited = scope.inAncestors(all, simple(cls), c.file);
+        if (inherited.length) return { ids: inherited };
+      }
+      // What is left: a free function, a type (Svc(x)), or something nested where the call is.
+      // Not another type's method, nor a type nested in another type (Reward.Image is not Image).
+      all = all.filter((id) => {
+        const o = scope.ownerOf(id);
+        return o === "" || caller.name === o || caller.name.startsWith(o + ".");
+      });
+      if (all.length === 0) return { ids: [] };
     }
 
     // Svc.x() or v.x() where v's type is written down: that class's x
     // ...also through calls and fields: repo.find(id).total() -> find's return type
     const typeName = receiver && caller ? scope.typeOfExpr(receiver, caller) : null;
     if (typeName) {
-      // A type the repo doesn't define (String, List, a library class): not a call into repo code.
-      if (!scope.isRepoType(typeName)) return null;
-      const typed = all.filter((id) => ownerSimple(node(id).name) === typeName || simple(node(id).name) === typeName);
-      if (typed.length) return typed;
+      // A type the repo doesn't define or add to (String, List, a library class): not a call into repo code...
+      if (!scope.isRepoType(typeName) && !scope.ancestorsOf(typeName).some((t) => scope.isRepoType(t))) {
+        // ...unless the repo adds the method to a library protocol that type adopts, which only the
+        // compiler knows: Text("a").card() with `extension View { func card() }`. Trusted when one fits.
+        const added = spec?.moduleScope ? all.filter((id) => scope.isExtendedOnly(scope.ownerSimpleOf(id))) : [];
+        return added.length ? { ids: added, unsure: true } : null;
+      }
+      let typed = all.filter((id) => scope.ownerSimpleOf(id) === typeName || simple(node(id).name) === typeName);
+      if (spec?.moduleScope) typed = scope.ofExactType(typed, typeName);
+      if (typed.length) return { ids: typed };
       // Not declared on that type: a method it inherits.
       const inherited = scope.inAncestors(all, typeName, c.file);
-      if (inherited.length) return inherited;
+      if (inherited.length) return { ids: inherited };
       // ...or one a subclass adds (`request.responseString()` on a Request, declared on DataRequest).
-      const sub = all.filter((id) => scope.ancestorsOf(ownerSimple(node(id).name)).includes(typeName));
-      if (sub.length) return sub;
+      const sub = all.filter((id) => scope.ancestorsOf(scope.ownerSimpleOf(id)).includes(typeName));
+      if (sub.length) return { ids: sub };
       // ...or one it inherits from a library type (`interface OrderRepo extends JpaRepository`).
-      if (scope.ancestorsOf(typeName).some((a) => !scope.isRepoType(a))) return null;
+      if (scope.ancestorsOf(typeName).some((t) => !scope.isRepoType(t))) return null;
     }
 
     // Same file first, then files the caller imports or shares a folder with.
     const local = all.filter((id) => node(id).file === c.file);
-    if (local.length) return local;
+    if (local.length) return { ids: local };
     const visible = all.filter((id) => visibility.canSee(c.file, node(id).file));
-    if (visible.length) return visible;
+    if (spec?.moduleScope && visible.length) {
+      // The whole module is visible. A method of something nobody typed (`items.map { }`) is
+      // trusted only when one fits; a free function or a type in the same folder comes first.
+      if (receiver !== "") return { ids: visible, unsure: true };
+      const near = visible.filter((id) => posix.dirname(node(id).file) === posix.dirname(c.file));
+      return { ids: near.length ? near : visible };
+    }
+    if (visible.length) return { ids: visible };
 
     // Nothing reachable: only a name that exists once in the whole repo is trusted.
-    return all.length === 1 ? all : [];
+    return { ids: all.length === 1 ? all : [] };
   }
 }
 
 const TYPE_KINDS = new Set(["class", "struct", "interface", "enum", "trait", "module"]);
+/** At most this many constructors are drawn for one `Svc(...)`. */
+const MAX_CONSTRUCTORS = 3;
 const CONSTRUCTORS = new Set(["__init__", "initialize", "constructor", "__construct", "init"]);
 
 /**
@@ -247,6 +484,11 @@ class TypeScope {
   private readonly ancestorCache = new Map<string, string[]>();
   private readonly symbolsByName = new Map<string, GraphNode[]>();
   private readonly exprCache = new Map<string, string | null>();
+  /** Answers of declaresLocal and declaresField. */
+  private readonly declared = new Map<string, boolean>();
+  /** Each symbol's owner ("Svc" for "Svc.load(_:)"), and the symbols by owner and name: both are asked for every call. */
+  private readonly owners = new Map<string, string>();
+  private readonly members = new Map<string, string[]>();
   private globals: Map<string, { file: string; line: number; text: string }> | null = null;
 
   constructor(
@@ -255,10 +497,18 @@ class TypeScope {
     private readonly visibility: Visibility,
     typeParents: { type: string; parents: string[] }[] = [],
     private readonly returns = new Map<string, string>(),
+    properties: ReadonlySet<string> = new Set(),
+    knownParents: Record<string, string> = {},
+    /** The language rules of a file. */
+    private readonly specOf: (file: string) => LanguageSpec | undefined = () => undefined,
   ) {
     for (const t of typeParents) {
       const key = simple(t.type);
       this.parents.set(key, [...new Set([...(this.parents.get(key) ?? []), ...t.parents])]);
+    }
+    // Library classes the repo builds on: their own parents (UITableViewCell -> UIView).
+    for (const [type, parent] of Object.entries(knownParents)) {
+      if (!this.parents.has(type)) this.parents.set(type, [parent]);
     }
     for (const n of meta.values()) {
       if (TYPE_KINDS.has(n.kind)) {
@@ -267,15 +517,41 @@ class TypeScope {
         this.repoTypes.add(key);
       }
       const cls = owner(n.name);
+      this.owners.set(n.id, cls);
+      const member = `${cls}\n${simple(n.name)}`;
+      this.members.set(member, [...(this.members.get(member) ?? []), n.id]);
       if (cls) this.repoTypes.add(simple(cls));
       const key = simple(n.name);
       this.symbolsByName.set(key, [...(this.symbolsByName.get(key) ?? []), n]);
       // Constructors stay: Python, Ruby, JS and PHP set their fields there (`self.repo = Repo()`).
       if (cls && !CONSTRUCTORS.has(simple(n.name)) && simple(n.name) !== simple(cls)) {
         const key = `${n.file}#${cls}`;
-        this.memberLines.set(key, [...(this.memberLines.get(key) ?? []), [n.line, n.endLine ?? n.line]]);
+        // A property's declaration (`lazy var table: UITableView = {`) stays a field; it may come after
+        // lines of attributes (`@objc`).
+        let first = n.line;
+        if (properties.has(n.id)) {
+          const lines = this.linesOf.get(n.file) ?? [];
+          while (first < (n.endLine ?? n.line) && !/\b(var|let)\b/.test(lines[first - 1] ?? "")) first++;
+          first++;
+        }
+        this.memberLines.set(key, [...(this.memberLines.get(key) ?? []), [first, n.endLine ?? n.line]]);
       }
     }
+  }
+
+  /** The qualified name of the type or function a symbol is in; "" at the top level. */
+  ownerOf(id: string): string {
+    return this.owners.get(id) ?? "";
+  }
+
+  /** The same, last part only: "Inner" for "Outer.Inner.run". */
+  ownerSimpleOf(id: string): string {
+    return simple(this.ownerOf(id));
+  }
+
+  /** The symbols called `name` (without labels) in the type with this qualified name. */
+  membersOf(type: string, name: string): string[] {
+    return this.members.get(`${type}\n${name}`) ?? [];
   }
 
   /** Parents, grandparents… of a type, nearest first (simple names, at most 8 levels). */
@@ -300,7 +576,7 @@ class TypeScope {
   /** The candidates declared on the nearest ancestor of `type` that has one (visible from `file` when possible). */
   inAncestors(all: string[], type: string, file: string): string[] {
     for (const a of this.ancestorsOf(type)) {
-      const found = all.filter((id) => ownerSimple(this.meta.get(id)!.name) === a);
+      const found = all.filter((id) => this.ownerSimpleOf(id) === a);
       if (!found.length) continue;
       const visible = found.filter((id) => this.visibility.canSee(file, this.meta.get(id)!.file));
       return visible.length ? visible : found;
@@ -310,6 +586,25 @@ class TypeScope {
 
   isRepoType(name: string): boolean {
     return this.repoTypes.has(name);
+  }
+
+  /** A library type the repo only adds members to (`extension View { ... }`). */
+  isExtendedOnly(name: string): boolean {
+    return this.repoTypes.has(name) && !this.typesByName.has(name);
+  }
+
+  /**
+   * Of members whose type is called `type`: those of the top-level type by that
+   * name. When that type exists but has none of them, the others belong to
+   * same-named types nested elsewhere (`Reward` vs `BackingFragment.Reward`): none.
+   */
+  ofExactType(ids: string[], type: string): string[] {
+    const exact = ids.filter((id) => {
+      const name = this.meta.get(id)!.name;
+      return owner(name) === type || name === type;
+    });
+    if (exact.length) return exact;
+    return (this.typesByName.get(type) ?? []).some((t) => t.name === type) ? [] : ids;
   }
 
   /** Ruby's `@repo` -> "self.repo"; Go's `s` in `func (s *Svc)` -> "self" (`s.repo` -> "self.repo"). */
@@ -363,7 +658,10 @@ class TypeScope {
     if (!t || !this.isRepoType(t)) return null;
     if (isCall) return this.returnOfMethod(t, name);
     if (/^[A-Z]/.test(name)) return name; // Outer.Inner
-    return this.fieldOfType(t, name);
+    const field = this.fieldOfType(t, name);
+    if (field || !this.specOf(caller.file)?.enumCases) return field;
+    // Status.active: a case of the enum Status is a Status.
+    return recv === t && (this.typesByName.get(t) ?? []).some((n) => n.kind === "enum") ? t : null;
   }
 
   /** Declared return type of `name` on a type or its parents; LIBRARY when only a library parent can have it. */
@@ -430,7 +728,7 @@ class TypeScope {
     if (this.cache.has(key)) return this.cache.get(key)!;
     this.cache.set(key, null);
     const code = this.code(caller);
-    let found = typeOfVariable(variable, code);
+    let found = typeOfVariable(variable, code, this.specOf(caller.file)?.typeCalls);
     // var o = repo.find(id) / o, err := svc.Load() / let o = try await api.load()
     if (!found) {
       const rhs = assignedExpr(variable, code);
@@ -446,6 +744,13 @@ class TypeScope {
         found = this.fieldType(variable, t);
         if (found) break;
       }
+      // ...or a field a parent class declares (where a bare name can be one).
+      if (!found && this.specOf(caller.file)?.implicitSelf) {
+        for (const a of this.ancestorsOf(simple(cls))) {
+          for (const decl of this.typesByName.get(a) ?? []) found ??= this.fieldType(variable, decl);
+          if (found) break;
+        }
+      }
     }
     this.cache.set(key, found);
     return found;
@@ -459,13 +764,62 @@ class TypeScope {
       if (a === type.line) continue; // a member on the type's own first line (Kotlin `class A(val x: X)`)
       for (let i = a; i <= b; i++) if (i - type.line >= 0 && i - type.line < lines.length) lines[i - type.line] = "";
     }
-    const found = typeOfVariable(variable, lines.join("\n"));
+    const found = typeOfVariable(variable, lines.join("\n"), this.specOf(type.file)?.typeCalls);
     this.cache.set(key, found);
     return found;
   }
 
   private code(n: GraphNode): string {
     return (this.linesOf.get(n.file) ?? []).slice(n.line - 1, n.endLine ?? n.line).join("\n");
+  }
+
+  /** True when a symbol's code declares `name` itself: a parameter, a `let`/`var`, a loop or closure variable. */
+  declaresLocal(n: GraphNode, name: string, called = false): boolean {
+    const key = `${n.id}>${name}>${called}`;
+    const known = this.declared.get(key);
+    if (known !== undefined) return known;
+    const found = this.findsLocal(n, name, called);
+    this.declared.set(key, found);
+    return found;
+  }
+
+  private findsLocal(n: GraphNode, name: string, called: boolean): boolean {
+    const v = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    let code = this.code(n);
+    // `let image = image(named: "x")` calls the function image, it does not make image a closure.
+    if (called) code = code.replace(new RegExp(`\\b(?:let|var)\\s+${v}\\s*(?::[^=\\n]+)?=\\s*(?:try[?!]?\\s+|await\\s+)*${v}\\s*\\(`, "g"), "");
+    const open = code.indexOf("{");
+    const signature = open < 0 ? code : code.slice(0, open);
+    return (
+      new RegExp(`[(,]\\s*(?:\\w+\\s+)?${v}\\s*:`).test(signature) || // func f(_ name: T)
+      new RegExp(`\\b(?:let|var|for)\\s+${v}\\b`).test(code) || // let name = / if let name { / for name in
+      new RegExp(`\\b(?:let|var)\\s*\\([^)\\n]*\\b${v}\\b[^)\\n]*\\)\\s*=`).test(code) || // let (a, name) =
+      new RegExp(`[{,(]\\s*${v}\\s*(?:,[\\w\\s,]*)?\\)?\\s+in\\b`).test(code) // { name in / { a, name in
+    );
+  }
+
+  /** True when a type declares a plain stored property `name` (which hides a global of that name). */
+  declaresField(file: string, type: string, name: string): boolean {
+    const key = `${file}#${type}>>${name}`;
+    const known = this.declared.get(key);
+    if (known !== undefined) return known;
+    const found = this.findsField(file, type, name);
+    this.declared.set(key, found);
+    return found;
+  }
+
+  private findsField(file: string, type: string, name: string): boolean {
+    const v = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const own = this.meta.get(`${file}#${type}`);
+    const all = (this.typesByName.get(simple(type)) ?? []).filter((t) => t === own || (t.name === type && this.visibility.canSee(file, t.file)));
+    return all.some((t) => {
+      const lines = [...(this.linesOf.get(t.file) ?? []).slice(t.line - 1, t.endLine ?? t.line)];
+      for (const [a, b] of this.memberLines.get(`${t.file}#${t.name}`) ?? []) {
+        if (a === t.line) continue;
+        for (let i = a; i <= b; i++) if (i - t.line >= 0 && i - t.line < lines.length) lines[i - t.line] = "";
+      }
+      return new RegExp(`\\b(?:let|var)\\s+${v}\\b`).test(lines.join("\n"));
+    });
   }
 }
 

@@ -72,10 +72,10 @@ describe("tree-sitter symbols", () => {
       "}", //                                     15
     ].join("\n");
     expect(names("a.swift", src)).toEqual([
-      "interface Repo 1-3", "method Repo.save 2-2",
-      "struct Order 4-11", "method Order.total 6-8", "method Order.init 9-9", "method Order.subscript 10-10",
+      "interface Repo 1-3", "method Repo.save(_:) 2-2",
+      "struct Order 4-11", "method Order.total 6-8", "method Order.init(id:) 9-9", "method Order.subscript(_:) 10-10",
       "enum Status 12-12",
-      "method Order.save 14-14",
+      "method Order.save(_:) 14-14",
     ]);
   });
 

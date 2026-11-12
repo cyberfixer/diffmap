@@ -200,7 +200,7 @@ describe("missing definitions and calls (roadmap 22.2)", () => {
       "app/String+Slug.swift": "extension String {\n  func slug() -> String { self }\n}\n",
       "app/Use.swift": "class Use {\n  func run(name: String) { name.slug() }\n}\n",
     };
-    expect(callersOf(files, "app/String+Slug.swift#String.slug")).toEqual(["app/Use.swift#Use.run"]);
+    expect(callersOf(files, "app/String+Slug.swift#String.slug")).toEqual(["app/Use.swift#Use.run(name:)"]);
   });
 });
 
@@ -375,8 +375,8 @@ describe("overloads by argument count (roadmap 22.5)", () => {
       "app/B.swift": "class B {\n  func load(_ id: Int, cache: Bool, done: () -> Void) {}\n}\n",
       "app/Use.swift": "class Use {\n  func a() { each { x in x.load(1) } }\n  func b() { each { x in x.load(1, cache: false) { } } }\n}\n",
     };
-    expect(callersOf(files, "app/A.swift#A.load")).toEqual(["app/Use.swift#Use.a"]);
-    expect(callersOf(files, "app/B.swift#B.load")).toEqual(["app/Use.swift#Use.b"]);
+    expect(callersOf(files, "app/A.swift#A.load(_:cache:)")).toEqual(["app/Use.swift#Use.a"]);
+    expect(callersOf(files, "app/B.swift#B.load(_:cache:done:)")).toEqual(["app/Use.swift#Use.b"]);
   });
 
   it("when none fit, keeps them all (the count may be wrong)", () => {
