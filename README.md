@@ -94,7 +94,7 @@ diffmap main > result.json                             # raw data instead of a p
 ### Options
 
 ```
-diffmap <base>[..<head>] [--format json|html] [--depth N] [--scip FILE]...
+diffmap <base>[..<head>] [--format json|html] [--depth N] [--scip FILE]... [--no-cache]
 ```
 
 | Option | Meaning | Default |
@@ -104,6 +104,7 @@ diffmap <base>[..<head>] [--format json|html] [--depth N] [--scip FILE]...
 | `--format` | `html` (review page) or `json` (raw data) | `json` |
 | `--depth` | Levels of callers and callees to include | `1` |
 | `--scip` | A SCIP index for exact calls (see [Exact calls](#exact-calls-from-ci)); can be repeated | none |
+| `--no-cache` | Parse every file again. By default diffmap keeps what it read from each file in `.git/diffmap-outlines.json` and only parses files whose text changed | cache on |
 
 <details>
 <summary>Without npm link</summary>

@@ -1,10 +1,13 @@
+import { createHash } from "node:crypto";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
-import { extname } from "node:path";
+import { basename, dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Language, Parser } from "web-tree-sitter";
 import type { SymbolInfo, SymbolKind } from "../../../domain/symbol.js";
 import { LANGUAGES, firstIdent, type CallShape, type LanguageSpec, type Param, type UseNames } from "./languages.js";
 import type { Node } from "./node.js";
+import { outlineKey, type OutlineCache } from "./outline-cache.js";
 
 const require = createRequire(import.meta.url);
 
@@ -78,23 +81,34 @@ const CONTAINERS = new Set<SymbolKind>(["class", "struct", "interface", "enum", 
  * Trees live in WebAssembly memory, so each one is deleted right after use.
  */
 export class TreeSitterEngine {
+  /** When set, `outline` reads a text it has seen before from here instead of parsing it. */
+  cache: OutlineCache | null = null;
+
   private constructor(
     private readonly parser: Parser,
     private readonly byExt: Map<string, { spec: LanguageSpec; language: Language }>,
+    /** Names the reading rules: it changes whenever this folder's code or a grammar does (for caches). */
+    readonly stamp: string,
   ) {}
 
   static async load(specs: LanguageSpec[] = LANGUAGES): Promise<TreeSitterEngine> {
     await Parser.init();
     const byExt = new Map<string, { spec: LanguageSpec; language: Language }>();
+    const stamp = createHash("sha1");
+    // The code that reads a tree (this folder) and the library that builds it.
+    const here = dirname(fileURLToPath(import.meta.url));
+    for (const name of readdirSync(here).sort()) if (/\.(js|ts)$/.test(name) && !name.endsWith(".d.ts")) stamp.update(readFileSync(join(here, name)));
+    stamp.update(String(statSync(require.resolve("web-tree-sitter")).size));
     for (const spec of specs) {
       // A grammar diffmap ships itself (grammars/), else the one from tree-sitter-wasms.
       const file = spec.wasm
         ? fileURLToPath(new URL(`../../../../grammars/${spec.wasm}`, import.meta.url))
         : require.resolve(`tree-sitter-wasms/out/tree-sitter-${spec.id}.wasm`);
       const language = await Language.load(file);
+      stamp.update(`${basename(file)}:${statSync(file).size}:${spec.extensions.join()}`);
       for (const ext of spec.extensions) byExt.set(ext, { spec, language });
     }
-    return new TreeSitterEngine(new Parser(), byExt);
+    return new TreeSitterEngine(new Parser(), byExt, stamp.digest("hex"));
   }
 
   get extensions(): string[] {
@@ -134,6 +148,16 @@ export class TreeSitterEngine {
 
   /** Symbols, the calls made inside them, and each type's parent types, from one parse. */
   outline(path: string, source: string): Outline {
+    if (!this.cache) return this.readOutline(path, source);
+    const key = outlineKey(extname(path).toLowerCase(), source);
+    const known = this.cache.get(key);
+    if (known) return known;
+    const outline = this.readOutline(path, source);
+    this.cache.set(key, outline);
+    return outline;
+  }
+
+  private readOutline(path: string, source: string): Outline {
     return (
       this.with(path, source, (root, spec) => {
         const parents: TypeParents[] = [];

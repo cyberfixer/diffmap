@@ -759,14 +759,25 @@ class TypeScope {
   private fieldType(variable: string, type: GraphNode): string | null {
     const key = `${type.id}>>${variable}`;
     if (this.cache.has(key)) return this.cache.get(key)!;
+    const found = typeOfVariable(variable, this.fieldsText(type), this.specOf(type.file)?.typeCalls);
+    this.cache.set(key, found);
+    return found;
+  }
+
+  private readonly fieldsTexts = new Map<string, string>();
+
+  /** A type's own code without its members' bodies: where its fields are declared. */
+  private fieldsText(type: GraphNode): string {
+    const known = this.fieldsTexts.get(type.id);
+    if (known !== undefined) return known;
     const lines = [...(this.linesOf.get(type.file) ?? []).slice(type.line - 1, type.endLine ?? type.line)];
     for (const [a, b] of this.memberLines.get(`${type.file}#${type.name}`) ?? []) {
       if (a === type.line) continue; // a member on the type's own first line (Kotlin `class A(val x: X)`)
       for (let i = a; i <= b; i++) if (i - type.line >= 0 && i - type.line < lines.length) lines[i - type.line] = "";
     }
-    const found = typeOfVariable(variable, lines.join("\n"), this.specOf(type.file)?.typeCalls);
-    this.cache.set(key, found);
-    return found;
+    const text = lines.join("\n");
+    this.fieldsTexts.set(type.id, text);
+    return text;
   }
 
   private code(n: GraphNode): string {
