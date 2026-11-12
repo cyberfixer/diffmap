@@ -8,6 +8,13 @@
 
 ## Done
 
+### 28. Lighter analysis: files read once, quicker matching — DONE
+- What tree-sitter reads from a file (its symbols and calls) is kept by the file's text, in `diffmap-outlines.json` in the project's git folder. A later analysis of the same project parses only the files whose text changed. `--no-cache` on the command line reads everything again.
+- Matching by name repeats less work: the patterns for a variable's type are built once per name and skipped when the code never mentions it; a type's field text and "can this file see that one" are remembered.
+- Same links as before on seven repos (Alamofire, ios-oss, Exposed, nlohmann/json, libsignal, Signal-Android, gin), link for link. Whole-repo linking: Signal-Android 79 s -> 49 s, Exposed 11.4 s -> 8.3 s, ios-oss 26.9 s -> 21.7 s.
+- A whole analysis of django (7,100 files): 24.4 s -> 19.0 s the first time, 11.4 s after that. mall: 3.6 s -> 3.0 s -> 2.0 s.
+- Not done: parsing in several threads (would help the first analysis of a project), and the TypeScript side, which still type-checks the whole project each time.
+
 ### 27. Rust exact calls, and measuring accuracy — DONE
 - A SCIP index from rust-analyzer (`rust-analyzer scip .`) gives exact calls for Rust, from the CLI (`--scip`) and from the CI job. Checked on signalapp/libsignal (594 Rust files, index made in under four minutes): 8,399 of 8,435 function definitions in the index line up with diffmap's symbols; the rest are functions a macro writes.
 - rust-analyzer does not say which trait method an implementation stands for, so for such an index the "implements" links come from name matching: a changed implementation still shows who calls the trait method.

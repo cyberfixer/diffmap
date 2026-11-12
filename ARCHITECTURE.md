@@ -276,6 +276,7 @@ one in GitLab, so it becomes a general comment that quotes `file:line` and the c
 | Sessions, GitLab tokens | memory of the server | until sign-out or restart |
 | Project code (bare git repos) | `CACHE_DIR` (default `/data/repos`) | only new commits fetched; least recently used projects removed above `CACHE_MAX_GB` (default 15); review refs older than 30 days dropped |
 | Analyses | memory, the 20 most recently opened MR versions | until restart |
+| What was read from each file (symbols, calls) | `diffmap-outlines.json` in the project's git folder (`CACHE_DIR/<project>.git/`, or `.git/` for the CLI) | rewritten by each analysis with the files it met; ignored after diffmap's reading rules or a grammar change; removed with the project |
 | "Viewed" ticks on the service | `DATA_DIR/viewed.json`, per GitLab user and MR, each with the version of the file's change that was viewed (`changeVersion` in render-html.ts); a tick counts only while the version matches | kept |
 | "Viewed" ticks in a CLI report | the browser (localStorage) | per browser |
 | Theme choice | the browser (localStorage `diffmap:theme`) | per browser |

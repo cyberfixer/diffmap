@@ -133,8 +133,20 @@ export class Visibility {
     return out;
   }
 
+  private readonly seen = new Map<string, boolean>();
+
   canSee(from: string, target: string): boolean {
-    if (from === target || posix.dirname(from) === posix.dirname(target)) return true;
+    if (from === target) return true;
+    const key = `${from}\n${target}`;
+    const known = this.seen.get(key);
+    if (known !== undefined) return known;
+    const answer = this.looksUp(from, target);
+    this.seen.set(key, answer);
+    return answer;
+  }
+
+  private looksUp(from: string, target: string): boolean {
+    if (posix.dirname(from) === posix.dirname(target)) return true;
     const theirs = this.moduleOf.get(target);
     const mine = this.moduleOf.get(from);
     if (theirs !== undefined && mine !== undefined) return theirs === mine || this.modulesImported.get(from)!.has(theirs);
@@ -146,16 +158,13 @@ export class Visibility {
 
 const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-/**
- * The declared type of a variable inside a piece of code, from the usual forms:
- * `Svc svc` (Java, C#, C++), `svc: Svc` (TS, Kotlin, Swift, Python, Rust, Scala),
- * `svc = Svc(...)` / `svc = new Svc(...)` / `svc := Svc{` / `$svc = new Svc(`,
- * `svc Svc` / `svc *pkg.Svc` (Go fields and parameters), `@svc = Svc.new` (Ruby),
- * `cell = ... as! ItemCell` (Swift, Kotlin casts), `@Environment(Theme.self) var theme` (SwiftUI).
- * With `typeCalls` (a capitalised call makes a type, Swift), also `box = Box<Int>()`.
- */
-export function typeOfVariable(variable: string, code: string, typeCalls = false): string | null {
-  const v = escape(variable.replace(/^[$@]/, "")) + "`?"; // Swift: let `default` = ...
+/** The forms a variable's type is written in (see typeOfVariable), built once per variable name. */
+const patternsByName = new Map<string, RegExp[]>();
+function variablePatterns(name: string, typeCalls: boolean): RegExp[] {
+  const key = `${typeCalls ? 1 : 0}${name}`;
+  const known = patternsByName.get(key);
+  if (known) return known;
+  const v = escape(name) + "`?"; // Swift: let `default` = ...
   const patterns = [
     new RegExp(`\\b${v}\\s*=[^=\\n][^\\n]*?\\bas[?!]\\s+([A-Z][\\w]*)\\s*(?:$|[;,){]|else\\b)`, "m"), // Swift, Kotlin: cell = table.dequeue(...) as! ItemCell
     new RegExp(`@Environment\\(\\s*([A-Z][\\w]*)\\.self\\s*\\)[^\\n=]*\\bvar\\s+${v}\\b`), // SwiftUI: @Environment(Theme.self) private var theme
@@ -167,6 +176,25 @@ export function typeOfVariable(variable: string, code: string, typeCalls = false
   ];
   // Swift: box = Box<Int>() makes a Box. (In C#, `x = Load<T>()` is a method call, so this is not for everyone.)
   if (typeCalls) patterns.push(new RegExp(`\\b${v}\\s*=\\s*([A-Z][\\w]*)<[^>\\n]*>\\s*\\(`));
+  // A repo has a bounded number of variable names, but keep the memory bounded anyway.
+  if (patternsByName.size > 50_000) patternsByName.clear();
+  patternsByName.set(key, patterns);
+  return patterns;
+}
+
+/**
+ * The declared type of a variable inside a piece of code, from the usual forms:
+ * `Svc svc` (Java, C#, C++), `svc: Svc` (TS, Kotlin, Swift, Python, Rust, Scala),
+ * `svc = Svc(...)` / `svc = new Svc(...)` / `svc := Svc{` / `$svc = new Svc(`,
+ * `svc Svc` / `svc *pkg.Svc` (Go fields and parameters), `@svc = Svc.new` (Ruby),
+ * `cell = ... as! ItemCell` (Swift, Kotlin casts), `@Environment(Theme.self) var theme` (SwiftUI).
+ * With `typeCalls` (a capitalised call makes a type, Swift), also `box = Box<Int>()`.
+ */
+export function typeOfVariable(variable: string, code: string, typeCalls = false): string | null {
+  const name = variable.replace(/^[$@]/, "");
+  // Every form below writes the variable's name: code without it needs no search.
+  if (!code.includes(name)) return null;
+  const patterns = variablePatterns(name, typeCalls);
   for (const p of patterns) {
     const m = code.match(p);
     if (m) return m[1];

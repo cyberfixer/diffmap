@@ -19,6 +19,8 @@ export interface LanguageSupport {
   parsers: SymbolParserPort[];
   graphs: CallGraphPort[];
   highlighters: SyntaxHighlighterPort[];
+  /** The tree-sitter engine behind the parsers, e.g. to give it a cache of what it read before. */
+  treeSitter: TreeSitterEngine;
   /** diffmap's symbols in many files at once (same names as the parsers give). */
   listSymbols: (files: { path: string; source: string }[]) => Map<string, ListedSymbol[]>;
 }
@@ -34,6 +36,7 @@ export function loadLanguageSupport(): Promise<LanguageSupport> {
     parsers: [new TsMorphAdapter(), new TreeSitterSymbolParser(engine), new AngularTemplateParser()],
     graphs: [new TsMorphCallGraph(), new TreeSitterCallGraph(engine), new AngularGraph()],
     highlighters: [new TsHighlighter(), new TreeSitterHighlighter(engine)],
+    treeSitter: engine,
     listSymbols: (files) => {
       const out = new Map<string, ListedSymbol[]>();
       const ts = files.filter((f) => /\.tsx?$/i.test(f.path));
