@@ -8,6 +8,10 @@
 
 ## Done
 
+### 29. Dashboard — DONE
+- `/dashboard`, for the usernames in `ADMIN_USERS` (empty by default, so nobody): reviews being got ready now and how many wait for a slot; the last 50 analyses with their times, outcome and whether an index was used; totals since the start; memory; people signed in; each project's size on disk against the limit; the latest log lines. Refreshes every five seconds.
+- Kept in memory only: the numbers start again with the service.
+
 ### 28. Lighter analysis: files read once, quicker matching — DONE
 - What tree-sitter reads from a file (its symbols and calls) is kept by the file's text, in `diffmap-outlines.json` in the project's git folder. A later analysis of the same project parses only the files whose text changed. `--no-cache` on the command line reads everything again.
 - Matching by name repeats less work: the patterns for a variable's type are built once per name and skipped when the code never mentions it; a type's field text and "can this file see that one" are remembered.

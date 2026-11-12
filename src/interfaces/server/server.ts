@@ -11,6 +11,8 @@ import { pkcePair, type OAuthTokens } from "../../infrastructure/gitlab/gitlab-o
 import { renderHtml } from "../html/render-html.js";
 import type { ServerConfig } from "./config.js";
 import { errorPage, homePage, loadingPage, signInPage } from "./pages.js";
+import { dashboardPage, type DashboardData } from "./dashboard-page.js";
+import type { RepoCacheUsage } from "../../infrastructure/git/git-repo-cache.js";
 import { SessionStore, type Session } from "./sessions.js";
 import type { HostProfile } from "./host-profile.js";
 import { redactSecrets, sensitiveValues } from "./safe-log.js";
@@ -33,6 +35,10 @@ export interface AppDeps {
   highlighters?: SyntaxHighlighterPort[];
   sessions?: SessionStore;
   log?: (msg: string) => void;
+  /** For the dashboard: how busy the analysis workers are. */
+  workers?: () => { running: number; waiting: number; max: number; memoryMb: number };
+  /** For the dashboard: the room the projects' code takes on disk. */
+  storage?: () => Promise<RepoCacheUsage>;
 }
 
 const COOKIE = "diffmap_session";
@@ -132,7 +138,36 @@ export function createApp(deps: AppDeps): Server {
   const sessions = deps.sessions ?? new SessionStore();
   // Every log line goes through redactSecrets: no query string or sign-in code is ever written.
   const write = deps.log ?? ((m: string) => console.log(m));
-  const log = (m: string, values: string[] = []) => write(redactSecrets(m, values));
+  // The newest lines are also kept for the dashboard (already without secrets).
+  const recentLog: { at: number; text: string }[] = [];
+  const log = (m: string, values: string[] = []) => {
+    const text = redactSecrets(m, values);
+    recentLog.push({ at: Date.now(), text });
+    if (recentLog.length > 200) recentLog.splice(0, recentLog.length - 200);
+    write(text);
+  };
+  const startedAt = Date.now();
+  const counters = { mapsOpened: 0, signIns: 0 };
+  /** The dashboard names projects and review titles, so it is for the people in ADMIN_USERS only. */
+  const isAdmin = (s: Session) => config.adminUsers.includes(s.user.username.toLowerCase());
+  const dashboardData = async (): Promise<DashboardData> => {
+    const memory = process.memoryUsage();
+    return {
+      now: Date.now(),
+      startedAt,
+      hostName: host.name,
+      hostUrl: config.hostUrl,
+      mode: config.mode === "view" || !deps.oauth ? "view" : "full",
+      node: process.version,
+      memory: { rssBytes: memory.rss, heapBytes: memory.heapUsed },
+      signedIn: sessions.size,
+      workers: deps.workers?.() ?? null,
+      review: deps.review.activity(),
+      storage: (await deps.storage?.().catch(() => null)) ?? null,
+      counters: { ...counters },
+      log: recentLog.slice(-100),
+    };
+  };
   const secure = config.publicUrl.startsWith("https://");
   const refreshing = new WeakMap<Session, Promise<void>>();
 
@@ -211,6 +246,7 @@ export function createApp(deps: AppDeps): Server {
       if (missing.length) return retry(`This token is missing the scope${missing.length > 1 ? "s" : ""} ${missing.join(" and ")}.`);
       // Kept in memory only, like OAuth tokens; never refreshed (it is the user's own token).
       const s = sessions.create(user, { accessToken: token, refreshToken: null, expiresAt: Number.MAX_SAFE_INTEGER });
+      counters.signIns++;
       log(`sign-in (view mode): @${user.username}`);
       return redirect(res, returnTo, { "Set-Cookie": cookie(s.id, 7 * 24 * 3600) });
     }
@@ -231,6 +267,7 @@ export function createApp(deps: AppDeps): Server {
       const tokens = await deps.oauth.exchange(code, pending.verifier);
       const user = await deps.hostFor(async () => tokens.accessToken).currentUser();
       const s = sessions.create(user, tokens);
+      counters.signIns++;
       log(`sign-in: @${user.username}`);
       return redirect(res, pending.returnTo, { "Set-Cookie": cookie(s.id, 7 * 24 * 3600) });
     }
@@ -241,12 +278,22 @@ export function createApp(deps: AppDeps): Server {
 
     // ── pages ──
     if (method === "GET" && path === "/") {
-      return send(res, 200, session ? homePage(session.user, host) : signInPage(host, "/", viewOnly ? "view" : "full"));
+      return send(res, 200, session ? homePage(session.user, host, "", isAdmin(session)) : signInPage(host, "/", viewOnly ? "view" : "full"));
+    }
+    if (method === "GET" && (path === "/dashboard" || path === "/api/dashboard")) {
+      const isApi = path === "/api/dashboard";
+      if (!session) return isApi ? json(res, 401, { error: "Not signed in." }) : redirect(res, loginUrl(path));
+      if (!isAdmin(session)) {
+        const why = `The dashboard is for the people who run this diffmap. To open it, @${session.user.username} must be listed in ADMIN_USERS.`;
+        return isApi ? json(res, 403, { error: why }) : send(res, 403, errorPage("Not for this account", why));
+      }
+      const data = await dashboardData();
+      return isApi ? json(res, 200, data) : send(res, 200, dashboardPage(data, host.refPrefix));
     }
     if (method === "GET" && path === "/go") {
       if (!session) return redirect(res, loginUrl(path + url.search));
       const link = parseReviewLink(url.searchParams.get("url") ?? "", host);
-      if (!link) return send(res, 400, homePage(session.user, host, `That doesn't look like a ${host.reviewName} link.`));
+      if (!link) return send(res, 400, homePage(session.user, host, `That doesn't look like a ${host.reviewName} link.`, isAdmin(session)));
       return redirect(res, host.pathFor(link.projectPath, link.number));
     }
 
@@ -300,6 +347,7 @@ export function createApp(deps: AppDeps): Server {
         // Show the download/analysis progress; the page reloads itself when ready.
         return send(res, 200, loadingPage(`${host.refPrefix}${iid} · ${review.mr.title}`, `${apiBase}/status`, review.status));
       }
+      counters.mapsOpened++;
       log(`map: ${review.mr.projectPath}!${iid} for @${session.user.username}`);
       const html = renderHtml(review.result, deps.highlighters ?? [], {
         mr: {
