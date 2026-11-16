@@ -43,6 +43,11 @@ export class ScipCallGraph implements CallGraphPort {
     this.supportedExtensions = [...exts];
   }
 
+  /** What the builders it falls back to ask for, so that they get it through the index too. */
+  wantsConfig(path: string): boolean {
+    return this.fallbacks.some((f) => f.wantsConfig?.(path) === true);
+  }
+
   isExact(path: string): boolean {
     return (
       this.index.documents.some((d) => d.path === path) ||

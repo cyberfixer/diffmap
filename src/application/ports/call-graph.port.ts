@@ -9,6 +9,8 @@ export interface CallGraphInput {
   removed: { id: string; name: string }[];
   /** How many hops of callers and callees to include around changed symbols. */
   depth: number;
+  /** Other files the builder asked for (see CallGraphPort.wantsConfig), e.g. tsconfig.json. */
+  configs?: { path: string; source: string }[];
 }
 
 export interface CallGraphResult {
@@ -24,5 +26,7 @@ export interface CallGraphPort {
   readonly supportedExtensions: readonly string[];
   /** True when calls in this file are resolved by a compiler (not by matching names). */
   isExact?(path: string): boolean;
+  /** Files besides its sources that tell it how to read them (TypeScript: tsconfig.json for import aliases). */
+  wantsConfig?(path: string): boolean;
   build(input: CallGraphInput): CallGraphResult;
 }

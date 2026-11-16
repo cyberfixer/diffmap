@@ -18,7 +18,7 @@ There are two ways to use it:
 
 | Language | Finds | Calls | Exact with a [CI index](#exact-calls-from-ci) |
 |---|---|---|---|
-| TypeScript | everything | **exact** (TypeScript compiler) | — |
+| TypeScript | everything | **exact** (TypeScript compiler, with the repo's `tsconfig.json` aliases) | — |
 | JavaScript | functions, classes, methods, arrow functions | matched by name | ✅ scip-typescript |
 | Java | classes, records, interfaces, enums, methods, constructors, method references | matched by name | ✅ scip-java |
 | Kotlin | classes, interfaces, enums, objects, functions, constructors, properties with a getter | matched by name | ✅ scip-java |
