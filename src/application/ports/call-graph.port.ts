@@ -5,8 +5,8 @@ export interface CallGraphInput {
   files: { path: string; source: string }[];
   /** Ids of changed symbols that still exist at head. */
   changedIds: string[];
-  /** Symbols the diff removed (they no longer exist at head). */
-  removed: { id: string; name: string }[];
+  /** Symbols the diff removed (they no longer exist at head), with the names Objective-C called them by (Swift). */
+  removed: { id: string; name: string; objcNames?: string[] }[];
   /** How many hops of callers and callees to include around changed symbols. */
   depth: number;
   /** Other files the builder asked for (see CallGraphPort.wantsConfig), e.g. tsconfig.json. */
@@ -16,6 +16,8 @@ export interface CallGraphInput {
 export interface CallGraphResult {
   nodes: GraphNode[]; // changed symbols plus neighbours (removed symbols excluded)
   edges: GraphEdge[];
+  /** Every name the repo defines a symbol under in these files, as code writes it (`load`, `Store`). */
+  names?: string[];
 }
 
 /**

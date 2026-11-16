@@ -154,7 +154,7 @@ flowchart LR
 | Engine | Folder | How it finds references |
 |---|---|---|
 | **TypeScript** | [parsers/typescript/](src/infrastructure/parsers/typescript/) | Loads the whole repo into the TypeScript type checker and asks it what each call points to. Exact. |
-| **tree-sitter** | [parsers/tree-sitter/](src/infrastructure/parsers/tree-sitter/) | Parses 14 languages. Each language has its own file in [languages/](src/infrastructure/parsers/tree-sitter/languages/) (`kotlin.ts`, `swift.ts`, `java.ts`, ...): which syntax nodes are definitions and calls, what its grammar cannot read (`prepare`), how it writes a variable's type (`variableTypes`), and which languages it can call (`family`: Java, Kotlin and Scala together, C and C++ together, "apple" for Swift and Objective-C, every other language alone). A call is only ever linked to code of the caller's family. [shared.ts](src/infrastructure/parsers/tree-sitter/languages/shared.ts) holds helpers several languages are built from; [scripts/compare-links.ts](scripts/compare-links.ts) shows, per language, what a change did to a real repo, so a change meant for one language can be seen to leave the others alone. A call to `update()` is matched **by name**, narrowed to what the caller can reach ([tree-sitter-call-graph.ts](src/infrastructure/parsers/tree-sitter/tree-sitter-call-graph.ts), [visibility.ts](src/infrastructure/parsers/tree-sitter/visibility.ts)): `self.x()` → same class; `Svc.x()`, a typed variable, field or property, or a chain through declared return types (`repo.find(id).total()`) → that class or the parent that declares it; a library type → not linked; else same file, then imported files or the same folder; else only if the name is unique. Several left: those that accept the argument count, then the one the file imports. Types' parents give "implements" links. [scripts/measure-links.ts](scripts/measure-links.ts) counts how calls in a repo were linked. [scripts/measure-accuracy.ts](scripts/measure-accuracy.ts) checks those links against a compiler: given a SCIP index of the same checkout, it counts per language the links that are right, wrong, unconfirmed (the compiler could not tell) and missed. **Swift** gets more, since it has no index to fall back on (flags and rules in its entry in languages.ts): names carry argument labels (`tableView(_:cellForRowAt:)`) and calls must fit them; properties with code are symbols and reading one is a use; `#selector(x)` and functions passed by name are uses; a plain `x()` is the type's own first; the files of a module see each other without imports. These uses need the names of every property first, so Swift files are read a second time ([engine.ts](src/infrastructure/parsers/tree-sitter/engine.ts) `uses`). Swift's grammar is newer than tree-sitter-wasms has and lives in [grammars/](grammars/README.md). |
+| **tree-sitter** | [parsers/tree-sitter/](src/infrastructure/parsers/tree-sitter/) | Parses 14 languages. Each language has its own file in [languages/](src/infrastructure/parsers/tree-sitter/languages/) (`kotlin.ts`, `swift.ts`, `java.ts`, ...): which syntax nodes are definitions and calls, what its grammar cannot read (`prepare`), how it writes a variable's type (`variableTypes`), and which languages it can call (`family`: Java, Kotlin and Scala together, C and C++ together, "apple" for Swift and Objective-C, every other language alone). A call is only ever linked to code of the caller's family. [shared.ts](src/infrastructure/parsers/tree-sitter/languages/shared.ts) holds helpers several languages are built from; [scripts/compare-links.ts](scripts/compare-links.ts) shows, per language, what a change did to a real repo, so a change meant for one language can be seen to leave the others alone. A call to `update()` is matched **by name**, narrowed to what the caller can reach ([tree-sitter-call-graph.ts](src/infrastructure/parsers/tree-sitter/tree-sitter-call-graph.ts), [visibility.ts](src/infrastructure/parsers/tree-sitter/visibility.ts)): `self.x()` → same class; `Svc.x()`, a typed variable, field or property, or a chain through declared return types (`repo.find(id).total()`) → that class or the parent that declares it; a library type → not linked; else same file, then imported files or the same folder; else only if the name is unique. Several left: those that accept the argument count, then the one the file imports. Types' parents give "implements" links. [scripts/measure-links.ts](scripts/measure-links.ts) counts how calls in a repo were linked. [scripts/measure-accuracy.ts](scripts/measure-accuracy.ts) checks those links against a compiler: given a SCIP index of the same checkout, it counts per language the links that are right, wrong, unconfirmed (the compiler could not tell) and missed. **Swift** gets more, since it has no index to fall back on (flags and rules in its entry in languages.ts): names carry argument labels (`tableView(_:cellForRowAt:)`) and calls must fit them; properties with code are symbols and reading one is a use; `#selector(x)` and functions passed by name are uses; a plain `x()` is the type's own first; the files of a module see each other without imports. These uses need the names of every property first, so Swift files are read a second time ([engine.ts](src/infrastructure/parsers/tree-sitter/engine.ts) `uses`). Objective-C calls reach Swift code by the names Objective-C sees (`objcNames` in swift.ts: `@objc(name)`, or the selector the Swift compiler makes for an `@objc` method). Swift's grammar is newer than tree-sitter-wasms has and lives in [grammars/](grammars/README.md). |
 | **SCIP index** | [scip/](src/infrastructure/scip/) | Reads an index made in CI by the language's own compiler (scip-typescript, scip-java, scip-clang, rust-analyzer). Exact references and "implements" links for the files it covers; other files fall back to the engines above. [scip-index.ts](src/infrastructure/scip/scip-index.ts) is a small built-in reader for the format. |
 | **Angular** | [parsers/angular/](src/infrastructure/parsers/angular/) | Reads `@Component`, `@Directive`, `@Pipe` and links templates to what they use: `<app-x>` → component, `[appY]` → directive, `\| pipe` → `transform()`, `(click)="save()"` → method. Runs next to the others. |
 
@@ -174,7 +174,7 @@ flowchart LR
   S["html-style.ts<br/>colours (light/dark), layout"] --> P
   C["html-client.ts<br/>selection, back/forward,<br/>usages panel, folding, viewed"] --> P
   M["html-client-mr.ts<br/>comments, replies, approve<br/>(service only)"] --> P
-  T["theme.ts<br/>Auto / Light / Dark button"] --> P
+  T["theme.ts, xcode-style.ts<br/>Auto / Light / Dark button,<br/>Xcode's colours button"] --> P
 ```
 
 - **Cards (left column):** one per changed file, with old and new line numbers.
@@ -184,7 +184,9 @@ flowchart LR
 - **The `DIFFMAP` object** in the page holds, per changed symbol, its before/after
   lines and every place it is used, with the id of the row to highlight.
 - **[html-client.ts](src/interfaces/html/html-client.ts)** underlines the name of
-  each changed symbol and highlights the selected symbol's lines. Selecting takes
+  each changed symbol and highlights the selected symbol's lines. A definition is
+  shown where the parser says its name is written (`nameAt`, line and column), not
+  on an attribute or decorator before it. Selecting takes
   the code column to the definition; the panel under the code lists the usages
   and shows the code around the one picked (callers outside the change in full),
   without moving the code column. It also keeps the back/forward history, fills
@@ -201,6 +203,13 @@ flowchart LR
 - **Changed letters:** [intraline.ts](src/application/intraline.ts) pairs each
   removed line with the added line that replaced it and finds the characters
   that differ; render-html.ts wraps them in `<span class="chg">`.
+- **Xcode's colours:** [xcode-style.ts](src/interfaces/html/xcode-style.ts) holds the
+  values of Xcode's Default (Light) and Default (Dark) themes, on when `<html>` has
+  `data-style="xcode"`. Besides its kind (keyword, type...), a token can carry a detail
+  (`HighlightDetail` in the highlighter port: a declaration, a type called like a function,
+  documentation, `#if`...), and the analysis lists the names the repo defines
+  (`names` in the result), so that a project's own type or function is told from a
+  library's. diffmap's own colours look only at the kind.
 - **Right-to-left text:** `bidiHtml` in render-html.ts wraps each Arabic or Hebrew
   run of a code line in `<bdi>`; in files without a highlighter, a line whose
   first letter is right-to-left gets `dir="rtl"`.
@@ -280,7 +289,7 @@ one in GitLab, so it becomes a general comment that quotes `file:line` and the c
 | What was read from each file (symbols, calls) | `diffmap-outlines.json` in the project's git folder (`CACHE_DIR/<project>.git/`, or `.git/` for the CLI) | rewritten by each analysis with the files it met; ignored after diffmap's reading rules or a grammar change; removed with the project |
 | "Viewed" ticks on the service | `DATA_DIR/viewed.json`, per GitLab user and MR, each with the version of the file's change that was viewed (`changeVersion` in render-html.ts); a tick counts only while the version matches | kept |
 | "Viewed" ticks in a CLI report | the browser (localStorage) | per browser |
-| Theme choice | the browser (localStorage `diffmap:theme`) | per browser |
+| Theme choice, and Xcode's colours on or off | the browser (localStorage `diffmap:theme`, `diffmap:style`) | per browser |
 
 ---
 
@@ -312,7 +321,7 @@ The browser scripts are checked by hand in a headless browser; see the commit me
 | Make name matching smarter | [tree-sitter-call-graph.ts](src/infrastructure/parsers/tree-sitter/tree-sitter-call-graph.ts) (`narrow`), [visibility.ts](src/infrastructure/parsers/tree-sitter/visibility.ts) |
 | Change how Swift is read | [languages/swift.ts](src/infrastructure/parsers/tree-sitter/languages/swift.ts); a newer grammar goes in [grammars/](grammars/README.md) |
 | Recognise a new kind of TypeScript symbol | [parsers/typescript/symbols.ts](src/infrastructure/parsers/typescript/symbols.ts) |
-| Change what the page looks like | [html-style.ts](src/interfaces/html/html-style.ts) (colours, layout), [render-html.ts](src/interfaces/html/render-html.ts) (markup) |
+| Change what the page looks like | [html-style.ts](src/interfaces/html/html-style.ts) (colours, layout), [xcode-style.ts](src/interfaces/html/xcode-style.ts) (Xcode's colours), [render-html.ts](src/interfaces/html/render-html.ts) (markup) |
 | Change how the page behaves | [html-client.ts](src/interfaces/html/html-client.ts), and [html-client-mr.ts](src/interfaces/html/html-client-mr.ts) for comments |
 | Add a CLI option | [cli/index.ts](src/interfaces/cli/index.ts) |
 | Add a service setting | [server/config.ts](src/interfaces/server/config.ts), [src/server.ts](src/server.ts), `.env.example`, README |

@@ -102,5 +102,12 @@ export function walkNeighbourhood(input: {
     const code = isChanged ? undefined : linesOf.get(n.file)?.slice(n.line - 1, n.endLine ?? n.line);
     nodes.push({ ...n, changed: isChanged, ...(code ? { code } : {}) });
   }
-  return { nodes, edges: [...edges.values()] };
+  return { nodes, edges: [...edges.values()], names: definedNames(meta.values()) };
+}
+
+/** The names symbols are written with: no owner, no Swift argument labels (`Svc.load(_:cache:)` -> `load`). */
+export function definedNames(symbols: Iterable<GraphNode>): string[] {
+  const names = new Set<string>();
+  for (const n of symbols) names.add((n.name.split(".").pop() ?? n.name).replace(/\((?:[^\s():]+:)+\)$/, ""));
+  return [...names];
 }

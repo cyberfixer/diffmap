@@ -16,6 +16,7 @@ export interface Node {
   readonly namedChildren: Node[];
   readonly childCount: number;
   readonly namedChildCount: number;
+  readonly nextSibling: Node | null;
   readonly nextNamedSibling: Node | null;
   childForFieldName(name: string): Node | null;
   childrenForFieldName(name: string): Node[];

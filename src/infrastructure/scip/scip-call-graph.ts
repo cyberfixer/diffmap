@@ -71,7 +71,7 @@ export class ScipCallGraph implements CallGraphPort {
       for (const s of listed.get(f.path) ?? []) {
         const id = `${f.path}#${s.name}`;
         if (meta.has(id)) continue;
-        meta.set(id, { id, file: f.path, name: s.name, kind: s.kind, changed: false, line: s.range.start, endLine: s.range.end, labels: s.labels ?? [] });
+        meta.set(id, { id, file: f.path, name: s.name, kind: s.kind, changed: false, line: s.range.start, endLine: s.range.end, ...(s.range.name ? { nameAt: s.range.name } : {}), labels: s.labels ?? [] });
         list.push({ ...s, id });
       }
       symbolsIn.set(f.path, list);
@@ -175,6 +175,8 @@ export class ScipCallGraph implements CallGraphPort {
         }
       }
     }
-    return { nodes: [...nodes.values()], edges };
+    // The names the repo defines, from the index and from the builders that ran.
+    const names = new Set([...(exact.names ?? []), ...[...built.values()].flatMap((r) => r.names ?? [])]);
+    return { nodes: [...nodes.values()], edges, names: [...names] };
   }
 }

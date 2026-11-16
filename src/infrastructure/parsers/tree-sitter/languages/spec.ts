@@ -18,6 +18,13 @@ export interface DefRule {
   extendTo?: (n: Node) => Node | null;
   /** Names of the types this one extends or implements (`class A extends B implements C` -> B, C). */
   supers?: (n: Node) => string[];
+  /**
+   * Swift: the names Objective-C calls this by, written the way an Objective-C call of them is
+   * read (`presentThread:` -> `presentThread(_:)`, see objc.ts `selectorName`): a method's selector,
+   * a property's getter and setter, a type's Objective-C name. Empty when Objective-C cannot be
+   * seen to reach it; then it is called by its own name, as before.
+   */
+  objcNames?: (n: Node) => string[];
   /** The declared return type of a function or method (`Order find()` -> "Order"). */
   returns?: (n: Node) => string | null;
   /** A property with code (Swift `var total: Int { ... }`): reading it counts as a use, like a call. */
@@ -146,4 +153,13 @@ export interface LanguageSpec {
   methodsAreWritten?: boolean;
   /** Method names the standard library gives nearly every type: never linked on a receiver of unknown type. */
   everyTypeHas?: ReadonlySet<string>;
+  /** Words the grammar reads as names or types but the language keeps for itself (Objective-C `self`, `YES`, `@end`): coloured as keywords. */
+  keywords?: ReadonlySet<string>;
+  /** A value is made by calling its type (Swift `Store()`), and only types start with a capital: such a call is coloured as a type. */
+  typesAreCalled?: boolean;
+  /**
+   * Objective-C: a call reaches Swift code that has Objective-C names (DefRule.objcNames) by those
+   * names only, and a type by its Objective-C name (`@objc(MYStore) class Store` is MYStore).
+   */
+  callsByObjcName?: boolean;
 }

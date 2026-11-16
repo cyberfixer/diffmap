@@ -63,6 +63,7 @@ export function mapChangesToSymbols(
       baseRange: inBase?.range ?? null,
       headRange: inHead?.range ?? null,
       diff: sliceDiff(diffLines, inBase?.range ?? null, inHead?.range ?? null),
+      ...(info.objcNames ? { objcNames: info.objcNames } : {}),
     });
   }
 

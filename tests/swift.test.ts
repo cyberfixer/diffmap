@@ -747,10 +747,91 @@ describe("Swift variable types", () => {
   });
 });
 
+describe("Swift: the line with the name, not an attribute before it (roadmap 38)", () => {
+  let repo: FixtureRepo | null = null;
+  afterEach(() => {
+    repo?.cleanup();
+    repo = null;
+  });
+
+  it("is where a changed method is, and where an implementation is listed", async () => {
+    const before = lines(
+      "protocol Presenter {", //                                1
+      "  func presentView(_ thread: Int)", //                   2
+      "}", //                                                   3
+      "class Screen: Presenter {", //                           4
+      "  @objc(presentView:)", //                               5
+      "  @MainActor", //                                        6
+      "  func presentView(_ thread: Int) {", //                 7
+      "    print(thread)", //                                   8
+      "  }", //                                                 9
+      "}", //                                                   10
+    );
+    repo = createFixtureRepo();
+    repo.write("App/Screen.swift", before);
+    repo.commit("initial");
+    repo.write("App/Screen.swift", before.replace("  func presentView(_ thread: Int)\n}", "  func presentView(_ thread: Int)\n  func close()\n}").replace("print(thread)", "print(thread + 1)"));
+    repo.commit("change");
+
+    const langs = await loadLanguageSupport();
+    const r = new AnalyzeRangeUseCase(new GitDiffReader(repo.dir), new GitSourceReader(repo.dir), langs.parsers, langs.graphs).execute("HEAD~1", "HEAD");
+    const screen = r.nodes.find((n) => n.id === "App/Screen.swift#Screen.presentView(_:)")!;
+    expect([screen.line, screen.nameAt]).toEqual([6, { line: 8, column: 7 }]);
+    expect(r.symbols.find((s) => s.name === "Screen.presentView(_:)")?.headRange?.name).toEqual({ line: 8, column: 7 });
+    // The protocol changed too: its implementation is listed on the line with its name.
+    expect(r.edges.find((e) => e.kind === "implements")?.sites).toEqual([{ line: 8, text: "  func presentView(_ thread: Int) {" }]);
+  });
+});
+
+describe("names the repo defines, for Xcode's colours (roadmap 37)", () => {
+  let repo: FixtureRepo | null = null;
+  afterEach(() => {
+    repo?.cleanup();
+    repo = null;
+  });
+
+  it("are listed when the page shows them: the repo's types and functions, not a library's", async () => {
+    repo = createFixtureRepo();
+    repo.write("App/Store.swift", lines("class Store {", "  func save() {}", "}"));
+    const screen = lines("import UIKit", "class Screen: UIViewController {", "  func run() {", "    Store().save()", "    print(1)", "  }", "}");
+    repo.write("App/Screen.swift", screen);
+    repo.commit("initial");
+    repo.write("App/Screen.swift", screen.replace("print(1)", "print(2)"));
+    repo.commit("change");
+
+    const langs = await loadLanguageSupport();
+    const r = new AnalyzeRangeUseCase(new GitDiffReader(repo.dir), new GitSourceReader(repo.dir), langs.parsers, langs.graphs).execute("HEAD~1", "HEAD");
+    expect(r.names).toEqual(["Screen", "Store", "run", "save"]);
+  });
+});
+
 describe("Swift highlighting", () => {
   it("colours attributes and the names of methods being called", () => {
     const out = new TreeSitterHighlighter(engine).highlight("a.swift", ["@MainActor func load() { api.fetch(id: 1) }"])!;
     const kinds = Object.fromEntries(out[0].filter((t) => t.kind !== "plain").map((t) => [t.text, t.kind]));
     expect(kinds).toMatchObject({ "@MainActor": "decorator", func: "keyword", load: "function", fetch: "function", "1": "number" });
+  });
+
+  it("tells declarations, types called like functions, documentation and #if apart (Xcode's colours, roadmap 37)", () => {
+    const out = new TreeSitterHighlighter(engine).highlight("a.swift", [
+      "/// Docs",
+      "// MARK: - Actions",
+      "#if DEBUG",
+      "final class Store: NSObject {",
+      "  var total: Int { 1 }",
+      "  func load() { let s = Store(); button.addTarget(self, action: #selector(load), for: .touchUpInside) }",
+      "}",
+      "#endif",
+    ])!;
+    const tokens = out.flat().filter((t) => t.kind !== "plain" || t.detail).map((t) => `${t.kind}${t.detail ? `+${t.detail}` : ""}:${t.text}`);
+    expect(tokens).toEqual([
+      "comment+doc:/// Docs",
+      "comment+mark:// MARK: - Actions",
+      "plain+preprocessor:#if", "plain+preprocessor:DEBUG",
+      "keyword:final", "keyword:class", "type+type-definition:Store", "type:NSObject",
+      "keyword:var", "plain+definition:total", "type:Int", "number:1",
+      "keyword:func", "function+definition:load", "keyword:let", "function+constructor:Store", "function:addTarget", "keyword:self", "keyword:#selector", "function:load",
+      "plain+preprocessor:#endif",
+    ]);
   });
 });

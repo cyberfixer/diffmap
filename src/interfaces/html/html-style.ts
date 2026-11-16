@@ -1,3 +1,5 @@
+import { XCODE_STYLE } from "./xcode-style.js";
+
 /** Dark-mode colour tokens, used for the system setting and for an explicit "dark" choice. */
 const DARK_TOKENS = `
 --bg:#141413; --panel:#1B1B19; --side:#171715; --line:#2C2B28; --line-strong:#45443F;
@@ -68,6 +70,7 @@ export const STYLE = `
   .hbtn:disabled { opacity:.5; cursor:not-allowed; }
   .theme { padding:0 9px; color:var(--fg2); }
   .theme svg { width:15px; height:15px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+  .theme[aria-pressed="true"] { border-color:var(--accent); background:var(--accent-bg); color:var(--accent); }
   .who { display:flex; align-items:center; gap:8px; margin:0; font-size:12px; color:var(--muted); }
   .link { border:0; background:none; padding:0; color:var(--accent); cursor:pointer; font-size:12px; }
   .link:hover { text-decoration:underline; }
@@ -307,4 +310,4 @@ export const STYLE = `
     .gap { padding-left:16px; }
     .keys { display:none; }
   }
-`;
+${XCODE_STYLE}`;

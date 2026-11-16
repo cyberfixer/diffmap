@@ -96,6 +96,30 @@ describe("tree-sitter symbols", () => {
   });
 });
 
+describe("where a definition writes its name (roadmap 38)", () => {
+  /** "name line:column" for each symbol: the line and column its name is written at. */
+  const at = (path: string, src: string) =>
+    engine.symbols(path, src).map((s) => `${s.name} ${s.range.start}>${s.range.name?.line}:${s.range.name?.column}`);
+
+  it("is after attributes, annotations and decorators, also when they hold the name", () => {
+    expect(at("a.swift", "class A {\n  @objc(save:)\n  @MainActor\n  func save(_ x: Int) {}\n  @objc(load:) func load(_ x: Int) {}\n}\n")).toEqual([
+      "A 1>1:6", "A.save(_:) 2>4:7", "A.load(_:) 5>5:20",
+    ]);
+    expect(at("A.kt", '@JvmName("load")\nfun load() {}\n')).toEqual(["load 1>2:4"]);
+    expect(at("A.java", "class A {\n  @Override\n  public void save() {}\n}\n")).toEqual(["A 1>1:6", "A.save 2>3:14"]);
+  });
+
+  it("is found in C declarators, Objective-C selectors and Swift's init, subscript and properties", () => {
+    expect(at("a.c", "static int helper(int x) { return x; }\n")).toEqual(["helper 1>1:11"]);
+    expect(at("a.m", "@implementation A\n- (instancetype)initWithName:(NSString *)name { return self; }\n- (IBAction)tap:(id)sender {}\n@end\n")).toEqual([
+      "A 1>1:16", "A.init(name:) 2>2:16", "A.tap(_:) 3>3:12",
+    ]);
+    expect(at("a.swift", "class A {\n  @objc init(size: Int) {}\n  subscript(i: Int) -> Int { i }\n  @objc dynamic var isOn: Bool { true }\n}\n")).toEqual([
+      "A 1>1:6", "A.init(size:) 2>2:8", "A.subscript(_:) 3>3:2", "A.isOn 4>4:20",
+    ]);
+  });
+});
+
 describe("tree-sitter call graph", () => {
   const files = [
     { path: "auth.py", source: "def login(email):\n    return check(email)\n\ndef check(e):\n    return e\n" },
@@ -129,6 +153,23 @@ describe("tree-sitter highlighter", () => {
     expect(kinds[0]).toEqual(["keyword:def", "function:go", "comment:# note"]);
     expect(kinds[1]).toEqual(["keyword:return", "function:run", "string:'é'", "number:42"]);
     expect(out.map((l) => l.map((t) => t.text).join(""))).toEqual(["def go(x):  # note", "    return run('é', 42)"]);
+  });
+
+  it("marks only the directive itself as the preprocessor, not the code an #if holds (Xcode's colours, roadmap 37)", () => {
+    const hl = new TreeSitterHighlighter(engine);
+    const preprocessor = (path: string, lines: string[]) =>
+      hl.highlight(path, lines)!.map((line) => line.filter((t) => t.detail === "preprocessor").map((t) => t.text).join(" "));
+    expect(preprocessor("store.h", ["#ifndef STORE_H", "#define STORE_H", "int store_count(int n);", "#endif"])).toEqual([
+      "#ifndef STORE_H", "#define STORE_H", "", "#endif",
+    ]);
+    expect(preprocessor("Inbox.m", ["@implementation Inbox", "#if DEBUG", "- (void)dump { int n = 1; }", "#endif", "@end"])).toEqual([
+      "", "#if DEBUG", "", "#endif", "",
+    ]);
+  });
+
+  it("keeps the colours of code inside a regular expression (Ruby's interpolation)", () => {
+    const out = new TreeSitterHighlighter(engine).highlight("a.rb", ["x =~ /#{prefix(item)}\\d+/"])!;
+    expect(out[0].filter((t) => t.kind !== "plain").map((t) => `${t.kind}:${t.text}`)).toEqual(["function:prefix"]);
   });
 
   it("keeps multi-line comments split per line", () => {
