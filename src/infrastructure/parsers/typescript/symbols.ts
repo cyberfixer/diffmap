@@ -58,11 +58,16 @@ export function listSymbolNodes(sourceFile: SourceFile): SymbolNode[] {
     }
 
     if (kind !== null && name !== null) {
+      // Where the name is written: decorators (`@Patch(':id')`) come before it, on lines of their own.
+      const written = Node.isConstructorDeclaration(node)
+        ? node.getFirstChildByKind(SyntaxKind.ConstructorKeyword)
+        : (node as Node & { getNameNode?: () => Node | undefined }).getNameNode?.();
+      const at = written ? sourceFile.getLineAndColumnAtPos(written.getStart()) : null;
       symbols.push({
         info: {
           name,
           kind,
-          range: { start: node.getStartLineNumber(), end: node.getEndLineNumber() },
+          range: { start: node.getStartLineNumber(), end: node.getEndLineNumber(), ...(at ? { name: { line: at.line, column: at.column - 1 } } : {}) },
         },
         node,
         labels: decoratorLabels(node),

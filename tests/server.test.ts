@@ -181,6 +181,9 @@ describe("diffmap service", () => {
     expect(html).toContain("Why trim here?");
     expect(html).toContain("/api/team/api/-/merge_requests/42");
     expect(html).toContain('class="fsec"');
+    // The light / dark button and the one for Xcode's colours, as in a report file.
+    expect(html).toContain('id="theme"');
+    expect(html).toContain('id="codestyle"');
     expect(r.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
   });
 

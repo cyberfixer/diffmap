@@ -5,7 +5,7 @@ import { basename, dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Language, Parser } from "web-tree-sitter";
 import type { SymbolInfo, SymbolKind } from "../../../domain/symbol.js";
-import { LANGUAGES, firstIdent, type CallShape, type LanguageSpec, type Param, type UseNames } from "./languages.js";
+import { LANGUAGES, firstIdent, type CallShape, type DefRule, type LanguageSpec, type Param, type UseNames } from "./languages.js";
 import type { Node } from "./node.js";
 import { outlineKey, type OutlineCache } from "./outline-cache.js";
 
@@ -79,6 +79,44 @@ export function receiverOf(callText: string, name: string): string {
 }
 
 const CONTAINERS = new Set<SymbolKind>(["class", "struct", "interface", "enum", "trait", "module"]);
+
+/** A definition's name before it is joined to its owner's: the rule's own, else the "name" field, else the first identifier. */
+export const definedName = (node: Node, rule: DefRule): string | null =>
+  (rule.name ? rule.name(node) : node.childForFieldName("name")?.text ?? firstIdent(node))?.replace(/\s+/g, "") ?? null;
+
+/** Swift's argument labels at the end of a name: "(_:cache:)". */
+const LABELS = /\((?:[^\s():]+:)+\)$/;
+/** Where a name is not written: attributes, annotations, modifiers, comments, strings, and the code after it. */
+const NOT_THE_NAME = /attribute|annotation|decorator|modifier|comment|string|body|block|compound_statement|statements|declaration_list|computed_property|parameter/;
+
+/**
+ * The node that writes a definition's name (`name` is what definedName gave): the first word
+ * that is the name, in its "name" field first, then in the whole definition (`helper` in
+ * `static void helper(int x)`, `update` in `int Svc::update()`). Attributes, annotations and
+ * comments are passed over, so `@objc(save:)` or `@JvmName("save")` before `save` is not it.
+ * Objective-C's `- initWithName:` is named `init(name:)`: failing a whole word, the first that starts with it.
+ */
+export function nameNode(def: Node, name: string): Node | null {
+  const written = (name.split(".").pop() ?? name).replace(LABELS, "");
+  const field = def.childForFieldName("name");
+  const find = (n: Node, test: (leaf: Node) => boolean): Node | null => {
+    if (n.childCount === 0) return test(n) ? n : null;
+    if (n !== def && n !== field && NOT_THE_NAME.test(n.type)) return null;
+    for (const c of n.children) {
+      const found = find(c, test);
+      if (found) return found;
+    }
+    return null;
+  };
+  const exact = (l: Node) => l.text === written;
+  // Swift gives a subscript's return type the field "name": the field is looked in first, not only.
+  return (
+    (field ? find(field, exact) : null) ??
+    find(def, exact) ??
+    (written ? find(def, (l) => l.text.startsWith(written) && /^\w/.test(l.text)) : null) ??
+    (field ? find(field, () => true) ?? field : null)
+  );
+}
 
 /**
  * Loads tree-sitter grammars once (asynchronously), then parses synchronously.
@@ -241,8 +279,7 @@ function listSymbols(
     let nextInType = inType;
     const rule = spec.defs[node.type];
     if (rule && (!rule.when || rule.when(node))) {
-      const raw = rule.name ? rule.name(node) : node.childForFieldName("name")?.text ?? firstIdent(node);
-      const name = raw?.replace(/\s+/g, "");
+      const name = definedName(node, rule);
       if (name) {
         let kind = rule.kindOf?.(node) ?? rule.kind;
         if (kind === "function" && inType) kind = "method";
@@ -263,8 +300,12 @@ function listSymbols(
             }
           }
           const last = rule.extendTo?.(node) ?? node;
+          const objc = rule.objcNames?.(node);
+          // Where the name is written: after any attributes and annotations the definition starts with.
+          const at = nameNode(node, name);
+          const written = at ? { name: { line: at.startPosition.row + 1, column: at.startPosition.column } } : {};
           out.push({
-            info: { name: qualified, kind, range: { start: node.startPosition.row + 1, end: endLine(last) } },
+            info: { name: qualified, kind, range: { start: node.startPosition.row + 1, end: endLine(last), ...written }, ...(objc?.length ? { objcNames: objc } : {}) },
             start: node.startIndex,
             end: last.endIndex,
           });

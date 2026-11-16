@@ -60,6 +60,7 @@ export class TsMorphCallGraph implements CallGraphPort {
           changed: false,
           line: sn.info.range.start,
           endLine: sn.info.range.end,
+          ...(sn.info.range.name ? { nameAt: sn.info.range.name } : {}),
           labels: sn.labels,
         });
       }

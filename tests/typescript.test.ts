@@ -156,6 +156,20 @@ describe("TypeScript symbol analysis", () => {
   });
 });
 
+describe("where a TypeScript symbol writes its name (roadmap 38)", () => {
+  it("is after its decorators, and the constructor keyword for a constructor", async () => {
+    const { Project } = await import("ts-morph");
+    const { listSymbolNodes } = await import("../src/infrastructure/parsers/typescript/symbols.js");
+    const sf = new Project({ useInMemoryFileSystem: true }).createSourceFile(
+      "/a.ts",
+      "class Api {\n  @Get(':id')\n  @Roles('admin')\n  findOne(id: string) {}\n  constructor(private svc: Svc) {}\n}\n",
+    );
+    expect(listSymbolNodes(sf).map((s) => `${s.info.name} ${s.info.range.start}>${s.info.range.name?.line}:${s.info.range.name?.column}`)).toEqual([
+      "Api 1>1:6", "Api.findOne 2>4:2", "Api.constructor 5>5:2",
+    ]);
+  });
+});
+
 describe("arrow functions as class properties (roadmap 3)", () => {
   it("are symbols, and calls through this.x() resolve to them exactly", async () => {
     const { listSymbolNodes } = await import("../src/infrastructure/parsers/typescript/symbols.js");

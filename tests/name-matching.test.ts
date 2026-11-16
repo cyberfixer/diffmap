@@ -726,3 +726,179 @@ describe("Objective-C, and Objective-C with Swift (roadmap 35)", () => {
     expect(callersOf(files, "App/Store.m#Store")).toEqual(["App/Cache.swift#Screen"]);
   });
 });
+
+describe("Objective-C calls Swift by the name Objective-C sees (roadmap 39)", () => {
+  const SWIFT = [
+    "class ThreadList: UIViewController {",
+    "  @objc(presentThread:)",
+    "  func presentView(_ thread: Thread) {}",
+    "  @objc func present(view: UIView) {}",
+    "  @objc func move(to point: Int) {}",
+    "  @objc func show(_ view: UIView, animated: Bool) {}",
+    "  @objc func save(_ item: Int) throws {}",
+    "  @objc func load() async {}",
+    "  @IBAction func didTap(_ sender: Any) {}",
+    "  func hidden(view: UIView) {}",
+    "  @objc var isEnabled: Bool { get { true } set {} }",
+    "  @objc(isOn) var on: Bool { true }",
+    "  @objc init(name: String) {}",
+    "}",
+    "@objc(MYStore) class Store: NSObject {",
+    "  @objc func flush() {}",
+    "}",
+    "@objcMembers class Cache: NSObject {",
+    "  func store(item: Int) {}",
+    "}",
+    "class Screen {",
+    "  func run(list: ThreadList, thread: Thread) {",
+    "    list.presentView(thread)",
+    "  }",
+    "}",
+    "",
+  ].join("\n");
+  const OBJC = [
+    '#import "App-Swift.h"',
+    "@implementation Inbox",
+    "- (void)open:(ThreadList *)list thread:(Thread *)thread {",
+    "    [list presentThread:thread];",
+    "    [list performSelector:@selector(presentThread:) withObject:thread afterDelay:0];",
+    "    [list presentView:thread];",
+    "    [list presentWithView:nil];",
+    "    [list moveTo:1];",
+    "    [list show:nil animated:YES];",
+    "    [list save:1 error:nil];",
+    "    [list loadWithCompletionHandler:nil];",
+    "    [list hiddenWithView:nil];",
+    "    [list setIsEnabled:[list isEnabled]];",
+    "    [list isOn];",
+    "    [[ThreadList alloc] initWithName:@\"a\"];",
+    "    [list.button addTarget:self action:@selector(didTap:) forControlEvents:1];",
+    "}",
+    "- (void)flush {",
+    "    MYStore *store = [MYStore new];",
+    "    [store flush];",
+    "    [self.cache storeWithItem:1];",
+    "}",
+    "@end",
+    "",
+  ].join("\n");
+  const files = { "App/ThreadList.swift": SWIFT, "App/Inbox.m": OBJC };
+  const open = "App/Inbox.m#Inbox.open(_:thread:)";
+  const swift = (name: string) => `App/ThreadList.swift#${name}`;
+
+  it("links a message and a @selector to the name @objc(..) gives (Fahad's presentThread:), not to the Swift name", async () => {
+    const { collector } = graph.link(Object.entries(files).map(([path, source]) => ({ path, source })));
+    const sites = collector.calls.get(`${open}>${swift("ThreadList.presentView(_:)")}>calls`)?.sites.map((s) => s.line);
+    // Lines 4 and 5 call it as presentThread:; line 6 writes presentView:, which Objective-C cannot call.
+    expect(sites).toEqual([4, 5]);
+  });
+
+  it("links to the selector Swift makes for an @objc method: With, prepositions, throws, async", () => {
+    for (const target of ["present(view:)", "move(to:)", "show(_:animated:)", "save(_:)", "load", "init(name:)", "didTap(_:)"]) {
+      expect(callersOf(files, swift(`ThreadList.${target}`)), target).toEqual([open]);
+    }
+    // Not seen by Objective-C (no @objc): no selector is made up for it.
+    expect(callersOf(files, swift("ThreadList.hidden(view:)"))).toEqual([]);
+  });
+
+  it("links a property's getter and setter, also under the name @objc(..) gives", () => {
+    expect(callersOf(files, swift("ThreadList.isEnabled"))).toEqual([open]);
+    expect(callersOf(files, swift("ThreadList.on"))).toEqual([open]);
+  });
+
+  it("reads a type by its Objective-C name, and an @objcMembers class's methods by their selectors", () => {
+    expect(callersOf(files, swift("Store.flush"))).toEqual(["App/Inbox.m#Inbox.flush"]);
+    expect(callersOf(files, swift("Cache.store(item:)"))).toEqual(["App/Inbox.m#Inbox.flush"]);
+  });
+
+  it("gives the page the words Objective-C writes for them, where they are not their own", () => {
+    const { meta } = graph.link(Object.entries(files).map(([path, source]) => ({ path, source })));
+    const words = (name: string) => meta.get(swift(name))?.objcNames;
+    expect(["ThreadList.presentView(_:)", "ThreadList.present(view:)", "ThreadList.isEnabled", "ThreadList.on", "ThreadList.init(name:)", "Store", "ThreadList.show(_:animated:)"].map(words)).toEqual([
+      ["presentThread"], ["presentWithView"], ["setIsEnabled"], ["isOn"], ["initWithName"], ["MYStore"], undefined,
+    ]);
+  });
+
+  it("leaves Swift calls as they were", () => {
+    expect(callersOf(files, swift("ThreadList.presentView(_:)"))).toEqual(["App/Inbox.m#Inbox.open(_:thread:)", "App/ThreadList.swift#Screen.run(list:thread:)"]);
+    const swiftOnly = { "App/ThreadList.swift": SWIFT + "class Other {\n  func go(list: ThreadList) {\n    list.presentThread(nil)\n  }\n}\n" };
+    expect(callersOf(swiftOnly, swift("ThreadList.presentView(_:)"))).toEqual(["App/ThreadList.swift#Screen.run(list:thread:)"]);
+  });
+
+  it("adds a @selector to another object's method only for Swift code Objective-C reaches by name, and with a colon", () => {
+    const more = {
+      "App/Cell.m": "@implementation FancyCell\n- (void)setSeparatorInset:(UIEdgeInsets)inset {}\n@end\n",
+      "App/Feed.m": "@implementation Feed\n- (void)configure:(UITableViewCell *)cell {\n    if ([cell respondsToSelector:@selector(setSeparatorInset:)]) { }\n}\n@end\n",
+      "App/Cache.swift": "class Cache: NSObject {\n  @objc func reloadData() {}\n}\n",
+      "App/List.m": "@implementation List\n- (void)refresh {\n    [self.tableView performSelector:@selector(reloadData) withObject:nil afterDelay:0];\n}\n@end\n",
+    };
+    // As before: a UIKit selector sent to a UIKit object is not the repo's only method of that name.
+    expect(callersOf(more, "App/Cell.m#FancyCell.setSeparatorInset(_:)")).toEqual([]);
+    expect(callersOf(more, "App/Cache.swift#Cache.reloadData")).toEqual([]);
+  });
+
+  it("puts `error:` of a throwing method before its trailing closures, as the compiler does", () => {
+    const loader = {
+      "App/Loader.swift": "class Loader: NSObject {\n  @objc func fetch(id: Int, completion: @escaping () -> Void) throws {}\n  @objc func run(completion: (() -> Void)?) throws {}\n}\n",
+      "App/Caller.m": [
+        "@implementation Caller",
+        "- (void)go:(Loader *)loader {",
+        "    NSError *e;",
+        "    [loader fetchWithId:1 error:&e completion:^{}];", // 4: the selector Swift makes
+        "    [loader fetchWithId:1 completion:^{} error:&e];", // 5: no such selector
+        "    [loader runAndReturnError:&e completion:nil];", // 6
+        "}",
+        "@end",
+        "",
+      ].join("\n"),
+    };
+    const { collector } = graph.link(Object.entries(loader).map(([path, source]) => ({ path, source })));
+    const lines = (to: string) => collector.calls.get(`App/Caller.m#Caller.go(_:)>App/Loader.swift#${to}>calls`)?.sites.map((x) => x.line);
+    expect([lines("Loader.fetch(id:completion:)"), lines("Loader.run(completion:)")]).toEqual([[4], [6]]);
+  });
+
+  it("reads `override` as a modifier, and names without their backticks", async () => {
+    const engine = await TreeSitterEngine.load();
+    const src = '@objcMembers class A: NSObject {\n  @available(*, deprecated, message: "do not override") func stop(now: Bool) {}\n  func h(`default`: Int) {}\n  override func viewDidLoad() {}\n}\n';
+    expect(engine.symbols("a.swift", src).map((s) => [s.name, s.objcNames])).toEqual([
+      ["A", undefined], ["A.stop(now:)", ["stopWithNow(_:)"]], ["A.h(`default`:)", ["hWithDefault(_:)"]], ["A.viewDidLoad", undefined],
+    ]);
+  });
+
+  it("links an Objective-C call to removed Swift code by its Objective-C name", () => {
+    const r = graph.build({
+      files: [{ path: "App/Inbox.m", source: "@implementation Inbox\n- (void)open:(id)list {\n    [list presentThread:nil];\n    [list presentView:nil];\n}\n@end\n" }],
+      changedIds: [],
+      removed: [{ id: "App/List.swift#List.presentView(_:)", name: "List.presentView(_:)", objcNames: ["presentThread(_:)"] }],
+      depth: 1,
+    });
+    // Line 3 calls it; line 4 writes its Swift name, which Objective-C cannot call.
+    expect(r.edges.filter((e) => e.kind === "calls-removed").map((e) => `${e.from} ${e.sites!.map((x) => x.line)}`)).toEqual(["App/Inbox.m#Inbox.open(_:) 3"]);
+  });
+
+  it("makes the selectors the Swift compiler makes", async () => {
+    const { objcSelector } = await import("../src/infrastructure/parsers/tree-sitter/languages/swift.js");
+    expect([
+      objcSelector("reload", []),
+      objcSelector("reload", ["_"]),
+      objcSelector("present", ["view"]),
+      objcSelector("present", ["_", "animated"]),
+      objcSelector("move", ["to"]),
+      objcSelector("moveTo", ["point"]),
+      objcSelector("init", ["name"]),
+      objcSelector("init", ["withName"]),
+      objcSelector("save", [], true),
+      objcSelector("save", ["_"], true),
+      objcSelector("load", [], false, true),
+      objcSelector("load", ["id"], true, true),
+      // lib/Sema/TypeCheckDeclObjC.cpp: the error parameter goes before trailing closures.
+      objcSelector("fetch", ["id", "completion"], true, false, 1),
+      objcSelector("run", ["completion"], true, false, 1),
+      objcSelector("h", ["`default`"]),
+    ]).toEqual([
+      "reload", "reload:", "presentWithView:", "present:animated:", "moveTo:", "moveToPoint:", "initWithName:", "initWithName:",
+      "saveAndReturnError:", "save:error:", "loadWithCompletionHandler:", "loadWithId:completionHandler:",
+      "fetchWithId:error:completion:", "runAndReturnError:completion:", "hWithDefault:",
+    ]);
+  });
+});

@@ -56,7 +56,8 @@ export class AnalyzeRangeUseCase {
       });
     });
 
-    const { nodes, edges } = this.buildGraph(symbols, resolvedHead, options.depth ?? 1);
+    const { nodes, edges, defined } = this.buildGraph(symbols, resolvedHead, options.depth ?? 1);
+    const names = shownNames(defined, files, nodes);
 
     const range = this.diffReader.describeRange?.(base, head, mergeBase);
     const parsedFiles = [...new Set(symbols.map((s) => s.file))];
@@ -65,7 +66,7 @@ export class AnalyzeRangeUseCase {
     );
     const exactness = { exact: exactFiles.length, total: parsedFiles.length };
 
-    return { base: resolvedBase, head: resolvedHead, symbols, nodes, edges, files, exactness, ...(range ? { range } : {}) };
+    return { base: resolvedBase, head: resolvedHead, symbols, nodes, edges, files, exactness, ...(range ? { range } : {}), ...(names.length ? { names } : {}) };
   }
 
   /** Many files of one revision, in bulk when the reader can. */
@@ -81,16 +82,17 @@ export class AnalyzeRangeUseCase {
     symbols: ChangedSymbol[],
     headRev: string,
     depth: number,
-  ): { nodes: GraphNode[]; edges: GraphEdge[] } {
+  ): { nodes: GraphNode[]; edges: GraphEdge[]; defined: Set<string> } {
     const named = symbols.filter((s) => s.kind !== "top-level");
     const nodes = new Map<string, GraphNode>();
     const edges = new Map<string, GraphEdge>();
+    const defined = new Set<string>();
 
     if (named.length > 0) {
       const changedIds = named.filter((s) => s.status !== "removed").map((s) => s.id);
       const removed = named
         .filter((s) => s.status === "removed")
-        .map((s) => ({ id: s.id, name: s.name }));
+        .map((s) => ({ id: s.id, name: s.name, ...(s.objcNames ? { objcNames: s.objcNames } : {}) }));
       const allFiles = this.sourceReader.listFiles(headRev);
 
       for (const builder of this.graphBuilders) {
@@ -108,6 +110,7 @@ export class AnalyzeRangeUseCase {
         const result = builder.build({ files, changedIds, removed, depth, ...(configs ? { configs } : {}) });
         for (const n of result.nodes) if (!nodes.has(n.id)) nodes.set(n.id, n);
         for (const e of result.edges) edges.set(`${e.from}>${e.to}>${e.kind}`, e);
+        for (const name of result.names ?? []) defined.add(name);
       }
     }
 
@@ -123,13 +126,27 @@ export class AnalyzeRangeUseCase {
         status: s.status,
         line: s.headRange?.start ?? s.baseRange?.start ?? 0,
         endLine: s.headRange?.end ?? s.baseRange?.end,
+        ...((s.headRange ?? s.baseRange)?.name ? { nameAt: (s.headRange ?? s.baseRange)!.name } : {}),
         labels: existing?.labels ?? [],
+        ...(existing?.objcNames ? { objcNames: existing.objcNames } : {}),
       });
     }
 
     // Drop edges whose endpoints are not on the map.
     const kept = [...edges.values()].filter((e) => nodes.has(e.from) && nodes.has(e.to));
 
-    return { nodes: [...nodes.values()], edges: kept };
+    return { nodes: [...nodes.values()], edges: kept, defined };
   }
+}
+
+/** Of the names the repo defines, those the page will show: written in a changed file or in a caller's code. */
+function shownNames(defined: Set<string>, files: FileView[], nodes: GraphNode[]): string[] {
+  if (defined.size === 0) return [];
+  const shown = new Set<string>();
+  const read = (text: string) => {
+    for (const word of text.match(/[A-Za-z_$][\w$]*/g) ?? []) if (defined.has(word)) shown.add(word);
+  };
+  for (const f of files) for (const l of f.lines) read(l.text);
+  for (const n of nodes) for (const l of n.code ?? []) read(l);
+  return [...shown].sort();
 }

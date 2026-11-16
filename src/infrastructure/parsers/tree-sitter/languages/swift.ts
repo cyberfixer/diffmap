@@ -2,6 +2,7 @@
 import type { Node } from "../node.js";
 import type { Param, CallShape, UseNames, LanguageSpec } from "./spec.js";
 import { blank, lastName, parentsIn, returnsAfter } from "./shared.js";
+import { selectorName } from "./objc.js";
 
 /**
  * A Swift function's name with its argument labels, the way Swift writes it:
@@ -303,6 +304,139 @@ function swiftMemberUse(n: Node, names: UseNames): CallShape | null {
   return null;
 }
 
+/** The attributes written before a declaration: `@objc(save:)` -> { name: "objc", argument: "save:" }. */
+function swiftAttributes(n: Node): { name: string; argument: string | null }[] {
+  const modifiers = n.namedChildren.find((c) => c.type === "modifiers");
+  return (modifiers?.namedChildren ?? [])
+    .filter((c) => c.type === "attribute")
+    .map((a) => {
+      const m = /^@\s*(\w+)\s*(?:\(([^)]*)\))?/.exec(a.text);
+      return { name: m?.[1] ?? "", argument: m?.[2]?.replace(/\s+/g, "") || null };
+    });
+}
+
+/** Attributes that make a declaration seen by Objective-C. */
+const OBJC_ATTRIBUTES = /^(objc|IBAction|IBOutlet|IBInspectable|IBSegueAction|NSManaged|GKInspectable)$/;
+
+/**
+ * Can Objective-C be seen to reach this declaration? It says so (`@objc`, `@IBAction`, ...), or
+ * it is in an `@objcMembers` class, an `@objc extension` or an `@objc protocol`. Not `@nonobjc`.
+ * (Swift also exposes a class's other extensions and subclasses under `@objcMembers`, and
+ * methods that satisfy an `@objc` protocol; those are not seen here.)
+ */
+function swiftIsObjc(n: Node): boolean {
+  const own = swiftAttributes(n).map((a) => a.name);
+  if (own.includes("nonobjc")) return false;
+  if (own.some((a) => OBJC_ATTRIBUTES.test(a))) return true;
+  for (let p = n.parent; p; p = p.parent) {
+    if (/^(function_body|computed_property|lambda_literal|statements)$/.test(p.type)) return false;
+    if (p.type === "protocol_declaration") return swiftAttributes(p).some((a) => a.name === "objc");
+    if (p.type === "class_declaration") {
+      const outer = swiftAttributes(p).map((a) => a.name);
+      return outer.includes("objcMembers") || (outer.includes("objc") && p.childForFieldName("declaration_kind")?.text === "extension");
+    }
+  }
+  return false;
+}
+
+/** Prepositions, as lib/Basic/PartsOfSpeech.def in the Swift compiler lists them. */
+const PREPOSITIONS = new Set([
+  "above", "after", "along", "alongside", "as", "at", "before", "below", "by", "following", "for", "from", "given", "in",
+  "including", "inside", "into", "matching", "of", "on", "passing", "preceding", "since", "to", "until", "using", "via",
+  "when", "with", "within",
+]);
+/** The first and last words of a camel-case name (`moveTo` -> "move", "To"; `loadURL` -> "URL"). */
+const firstWord = (s: string): string => /^(?:[a-z0-9]+|[A-Z]+(?![a-z])|[A-Z][a-z0-9]*)/.exec(s)?.[0] ?? s;
+const lastWord = (s: string): string => /(?:[A-Z]?[a-z0-9]+|[A-Z]+)$/.exec(s)?.[0] ?? s;
+const isPreposition = (word: string): boolean => PREPOSITIONS.has(word.toLowerCase());
+const capitalized = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
+
+/**
+ * The selector Swift gives an `@objc` method or init that names none, by the compiler's rules
+ * (AbstractFunctionDecl::getObjCSelector in lib/AST/Decl.cpp, github.com/swiftlang/swift):
+ * - no arguments: the name (`reload`); one argument without a label: `reload:`;
+ * - otherwise one piece per argument, the later ones their labels. The first label is added to
+ *   the name, with "With" between unless the label starts with a preposition or the name ends
+ *   with one: `present(view:)` -> `presentWithView:`, `move(to:)` -> `moveTo:`, `init(name:)` -> `initWithName:`;
+ * - `async` adds a piece `completionHandler:` at the end (`WithCompletionHandler:` when it is the
+ *   first); `throws` a piece `error:` (`AndReturnError:`) after the last argument that is not one of
+ *   the `trailingClosures`, the closures at the end (errorParameterIndex in lib/Sema/TypeCheckDeclObjC.cpp):
+ *   `fetch(id:completion:) throws` -> `fetchWithId:error:completion:`.
+ * Names are taken without their backticks: ``h(`default`:)`` -> `hWithDefault:`.
+ */
+export function objcSelector(base: string, labels: string[], throws = false, async = false, trailingClosures = 0): string {
+  const name = base.replace(/`/g, "");
+  const names = labels.map((l) => (l === "_" ? "" : l.replace(/`/g, "")));
+  const extraAt = async ? names.length : throws ? names.length - Math.min(trailingClosures, names.length) : -1;
+  const count = names.length + (extraAt >= 0 ? 1 : 0);
+  if (count === 0) return name;
+  if (count === 1 && names.length === 1 && !names[0]) return `${name}:`;
+  const pieces: string[] = [];
+  let arg = 0;
+  for (let piece = 0; piece < count; piece++) {
+    if (piece === extraAt) pieces.push(piece > 0 ? (async ? "completionHandler" : "error") : name + (async ? "WithCompletionHandler" : "AndReturnError"));
+    else if (piece > 0) pieces.push(names[arg++]);
+    else {
+      const first = names[arg++];
+      pieces.push(first ? name + (isPreposition(firstWord(first)) || isPreposition(lastWord(name)) ? "" : "With") + capitalized(first) : name);
+    }
+  }
+  return pieces.map((p) => `${p}:`).join("");
+}
+
+/** Is a parameter's type a function, looking through parentheses and one Optional (`(() -> Void)?`), as the compiler does for trailing closures? */
+function swiftIsFunctionType(t: Node | undefined, optional = true): boolean {
+  if (!t) return false;
+  if (t.type === "function_type") return true;
+  if (t.type === "tuple_type" && t.namedChildCount === 1) return swiftIsFunctionType(t.namedChildren[0].namedChildren.at(-1), optional);
+  return optional && t.type === "optional_type" && swiftIsFunctionType(t.namedChildren[0], false);
+}
+
+/**
+ * The names Objective-C calls a declaration by (see DefRule.objcNames): `@objc(name)` when it
+ * gives one, else the selector Swift makes. Not for an `override` without a name: it keeps the
+ * selector of what it overrides, often a system method Swift renamed on import, which is not in the repo.
+ */
+function swiftObjcNames(n: Node): string[] {
+  const named = swiftAttributes(n).find((a) => a.name === "objc" && a.argument)?.argument ?? null;
+  const modifiers = n.namedChildren.find((c) => c.type === "modifiers")?.namedChildren ?? [];
+  const override = modifiers.some((m) => m.type === "member_modifier" && m.text === "override");
+  if (!named && (!swiftIsObjc(n) || override)) return [];
+  switch (n.type) {
+    case "class_declaration":
+    case "protocol_declaration":
+      // @objc(MYStore) class Store: Objective-C writes MYStore. (An extension adds no name.)
+      return named && n.childForFieldName("declaration_kind")?.text !== "extension" ? [named] : [];
+    case "function_declaration":
+    case "protocol_function_declaration":
+    case "init_declaration": {
+      const base = n.type === "init_declaration" ? "init" : n.childForFieldName("name")?.text.replace(/`/g, "") ?? "";
+      if (!/^\w+$/.test(base)) return []; // operators
+      const kids = n.children.map((c) => c.type);
+      // The parameters at the end that take a function: `throws` puts its `error:` before them.
+      const types = n.children.filter((c) => c.type === "parameter").map((c) => [...c.namedChildren].reverse().find((k) => /_type$/.test(k.type)));
+      let trailing = 0;
+      while (trailing < types.length && swiftIsFunctionType(types[types.length - 1 - trailing])) trailing++;
+      const selector = named ?? objcSelector(base, swiftParams(n).map((p) => p.label), kids.includes("throws"), kids.includes("async"), trailing);
+      return [selectorName(selector)];
+    }
+    case "property_declaration":
+    case "protocol_property_declaration": {
+      // The getter is the property's name (or the one @objc gives); a `var` that can be set has `setName:`.
+      const property = named ?? swiftPropertyName(n);
+      if (!property) return [];
+      const computed = n.childForFieldName("computed_value");
+      const settable =
+        n.type === "protocol_property_declaration"
+          ? /\bset\b/.test(n.text)
+          : n.namedChildren.find((c) => c.type === "value_binding_pattern")?.text.trim() === "var" &&
+            (!computed || computed.namedChildren.some((c) => c.type === "computed_setter"));
+      return settable ? [property, selectorName(`set${capitalized(property)}:`)] : [property];
+    }
+  }
+  return [];
+}
+
 export const swift: LanguageSpec = {
   id: "swift",
   wasm: "tree-sitter-swift.wasm", // newer than tree-sitter-wasms has; see grammars/README.md
@@ -316,6 +450,7 @@ export const swift: LanguageSpec = {
   enumCases: true,
   moduleScope: true,
   knownParents: UIKIT_PARENTS,
+  typesAreCalled: true,
   defs: {
     // class, struct, enum, actor; an extension only names what is inside it (Order.total)
     class_declaration: {
@@ -326,8 +461,9 @@ export const swift: LanguageSpec = {
       },
       containerOnly: (n) => n.childForFieldName("declaration_kind")?.text === "extension",
       supers: parentsIn("inheritance_specifier"),
+      objcNames: swiftObjcNames,
     },
-    protocol_declaration: { kind: "interface", supers: parentsIn("inheritance_specifier") },
+    protocol_declaration: { kind: "interface", supers: parentsIn("inheritance_specifier"), objcNames: swiftObjcNames },
     // Names carry their argument labels: tableView(_:cellForRowAt:), init(frame:)
     function_declaration: {
       kind: "function",
@@ -335,20 +471,22 @@ export const swift: LanguageSpec = {
       returns: returnsAfter("->"),
       isStatic: swiftIsStatic,
       signature: (n) => swiftParams(n, !/^[\w`]/.test(n.childForFieldName("name")?.text ?? "")),
+      objcNames: swiftObjcNames,
     },
     protocol_function_declaration: {
       kind: "method",
       name: (n) => swiftName(n.childForFieldName("name")?.text, n),
       returns: returnsAfter("->"),
       signature: (n) => swiftParams(n),
+      objcNames: swiftObjcNames,
     },
-    init_declaration: { kind: "method", name: (n) => swiftName("init", n), signature: (n) => swiftParams(n) },
+    init_declaration: { kind: "method", name: (n) => swiftName("init", n), signature: (n) => swiftParams(n), objcNames: swiftObjcNames },
     deinit_declaration: { kind: "method", name: () => "deinit" },
     subscript_declaration: { kind: "method", name: (n) => swiftName("subscript", n, true), signature: (n) => swiftParams(n, true) },
     // var total: Int { ... } / lazy var table: UITableView = { ... }() / var items = [] { didSet { ... } }
-    property_declaration: { kind: "function", when: swiftPropertyHasCode, name: swiftPropertyName, property: true },
+    property_declaration: { kind: "function", when: swiftPropertyHasCode, name: swiftPropertyName, property: true, objcNames: swiftObjcNames },
     // var title: String { get } in a protocol, so that implementations link to it
-    protocol_property_declaration: { kind: "method", name: swiftPropertyName, property: true },
+    protocol_property_declaration: { kind: "method", name: swiftPropertyName, property: true, objcNames: swiftObjcNames },
   },
   calls: { call_expression: swiftCall, selector_expression: swiftSelector },
   uses: { simple_identifier: swiftNameUse, navigation_expression: swiftMemberUse },

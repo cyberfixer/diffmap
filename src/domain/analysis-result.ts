@@ -20,4 +20,9 @@ export interface AnalysisResult {
   range?: RangeInfo;
   /** Of the changed files with symbols, how many have calls resolved by a compiler (TypeScript, or a CI index). */
   exactness?: { exact: number; total: number };
+  /**
+   * The words in the code the page shows (changed files, callers) that are names the repo
+   * defines a symbol under: an editor colours those as the project's own, the rest as a library's.
+   */
+  names?: string[];
 }

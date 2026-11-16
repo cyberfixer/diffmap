@@ -28,6 +28,20 @@ const ownerSimple = (name: string): string => simple(owner(name) || "");
 const labelsOf = (name: string): string[] => LABELS.exec(member(name))?.[1].split(":").filter(Boolean) ?? [];
 
 /**
+ * The words Objective-C writes for Swift code, from the names it calls it by (DefRule.objcNames),
+ * where they are not the code's own: `presentThread(_:)` -> `presentThread`, `setTitle(_:)` -> `setTitle`,
+ * `init(name:)` -> `initWithName`, a type's `MYStore` as it is.
+ */
+function objcWords(name: string, aliases: string[], isType: boolean): string[] {
+  const words = aliases.map((a) => {
+    if (isType) return a;
+    const first = labelsOf(a)[0];
+    return simple(a) === "init" && first && first !== "_" ? `initWith${first[0].toUpperCase()}${first.slice(1)}` : simple(a);
+  });
+  return [...new Set(words)].filter((w) => w !== simple(name));
+}
+
+/**
  * Swift: can a function with these parameters take a call's arguments?
  * Each argument goes to the next parameter with its label; only parameters with a
  * default (or variadic ones) may be passed over. Trailing closures then fill
@@ -117,6 +131,7 @@ export class TreeSitterCallGraph implements CallGraphPort {
     const properties = new Set<string>(); // ids of properties with code
     const statics = new Set<string>(); // ids of static functions
     const signatures = new Map<string, Param[]>(); // symbol id -> its parameters one by one (Swift)
+    const objcAliases = new Map<string, string[]>(); // symbol id -> the names Objective-C calls it by (Swift)
     const outlines = new Map<string, Outline>();
     for (const f of files) {
       const outline = this.engine.outline(f.path, f.source);
@@ -133,7 +148,9 @@ export class TreeSitterCallGraph implements CallGraphPort {
       for (const s of symbols) {
         const id = `${f.path}#${s.name}`;
         if (meta.has(id)) continue; // overloads: keep the first
-        meta.set(id, { id, file: f.path, name: s.name, kind: s.kind, changed: false, line: s.range.start, endLine: s.range.end, labels: [] });
+        if (s.objcNames) objcAliases.set(id, s.objcNames);
+        const written = s.objcNames ? objcWords(s.name, s.objcNames, TYPE_KINDS.has(s.kind)) : [];
+        meta.set(id, { id, file: f.path, name: s.name, kind: s.kind, changed: false, line: s.range.start, endLine: s.range.end, ...(s.range.name ? { nameAt: s.range.name } : {}), labels: [], ...(written.length ? { objcNames: written } : {}) });
         const key = simple(s.name);
         byName.set(key, [...(byName.get(key) ?? []), id]);
       }
@@ -145,14 +162,29 @@ export class TreeSitterCallGraph implements CallGraphPort {
       if (properties.has(n.id)) names.properties.add(simple(n.name));
       else if (!TYPE_KINDS.has(n.kind)) names.functions.add(simple(n.name));
     }
+    // Swift code Objective-C reaches under other names: methods and properties by those names
+    // (`@objc(presentThread:) func presentView`), types by theirs (`@objc(MYStore) class Store`).
+    const byObjcName = new Map<string, string[]>();
+    const objcTypes = new Map<string, string>();
+    for (const [id, aliases] of objcAliases) {
+      const n = meta.get(id);
+      if (!n) continue;
+      if (TYPE_KINDS.has(n.kind)) for (const alias of aliases) objcTypes.set(alias, simple(n.name));
+      else for (const key of new Set(aliases.map(simple))) byObjcName.set(key, [...(byObjcName.get(key) ?? []), id]);
+    }
+    const renamedForObjc = (id: string) => objcAliases.has(id) && !TYPE_KINDS.has(meta.get(id)!.kind);
     const visibility = new Visibility(files, (path) => !!this.engine.spec(path)?.moduleScope);
-    const scope = new TypeScope(meta, linesOf, visibility, typeParents, returns, properties, this.engine.knownParents, (file) => this.engine.spec(file));
+    const scope = new TypeScope(meta, linesOf, visibility, typeParents, returns, properties, this.engine.knownParents, (file) => this.engine.spec(file), objcTypes);
 
     const removedByName = new Map<string, string[]>();
+    // ...and, for Objective-C, removed Swift code by the names Objective-C called it by (and by no other).
+    const removedByObjcName = new Map<string, string[]>();
     for (const r of removed) {
       const key = simple(r.name);
       removedByName.set(key, [...(removedByName.get(key) ?? []), r.id]);
+      for (const alias of new Set((r.objcNames ?? []).map(simple))) removedByObjcName.set(alias, [...(removedByObjcName.get(alias) ?? []), r.id]);
     }
+    const removedRenamed = new Set(removed.filter((r) => r.objcNames?.length).map((r) => r.id));
 
     const stats: LinkStats = { calls: 0, external: 0, one: 0, several: 0, tooMany: 0, unreachable: 0, libraryType: 0, implementsLinks: 0, uses: 0 };
     const collector = new CallCollector();
@@ -179,6 +211,23 @@ export class TreeSitterCallGraph implements CallGraphPort {
       }
       return list;
     };
+    // From Objective-C: Swift code it reaches under other names is called by those names, and by no other.
+    const objcCandidates = (family: string, name: string): readonly string[] => {
+      const key = `${family}\n${name}\nobjc`;
+      let list = inFamilyByName.get(key);
+      if (!list) {
+        const renamed = (byObjcName.get(name) ?? []).filter((id) => familyOf(node(id).file) === family);
+        list = [...new Set([...candidates(family, name).filter((id) => !renamedForObjc(id)), ...renamed])];
+        inFamilyByName.set(key, list);
+      }
+      return list;
+    };
+    // Does a symbol answer to a call's labels? Swift code renamed for Objective-C (see above) by one of those names.
+    const labelsFit = (id: string, c: FoundCall, byObjc: boolean): boolean => {
+      const labels = c.labels!.join(":");
+      if (byObjc && renamedForObjc(id)) return objcAliases.get(id)!.some((a) => simple(a) === c.name && labelsOf(a).join(":") === labels);
+      return labelsOf(node(id).name).join(":") === labels;
+    };
     // The same for the candidates that accept a call's argument labels (Swift).
     const fittingByLabels = new Map<string, readonly string[]>();
     // ...and for the properties, or the functions, of a name (uses that are not calls).
@@ -189,7 +238,8 @@ export class TreeSitterCallGraph implements CallGraphPort {
       const spec = this.engine.spec(c.file);
       // Only code of the caller's own language family: a Java call never reaches a Swift method of that name.
       const family = familyOf(c.file);
-      const inFamily = candidates(family, c.name);
+      const byObjc = !!spec?.callsByObjcName;
+      const inFamily = byObjc ? objcCandidates(family, c.name) : candidates(family, c.name);
       // The caller itself is no candidate; it can only be among them when it has that name.
       const self = simple(c.from) === c.name;
       let named = self ? inFamily.filter((id) => id !== from) : inFamily;
@@ -204,7 +254,7 @@ export class TreeSitterCallGraph implements CallGraphPort {
 
       // Not a call: a property read, or a function passed by name. Linked only when it is clear whose.
       if (c.use) {
-        const key = `${family}\n${c.name}\n${c.use}`;
+        const key = `${family}\n${c.name}\n${c.use}${byObjc ? "\nobjc" : ""}`;
         let usable = usableByName.get(key);
         if (!usable) {
           usable = inFamily.filter((id) => (c.use === "read" ? properties.has(id) : !TYPE_KINDS.has(node(id).kind) && !properties.has(id)));
@@ -212,7 +262,15 @@ export class TreeSitterCallGraph implements CallGraphPort {
         }
         const all = self ? usable.filter((id) => id !== from) : [...usable];
         let targets = this.narrowUse(all, c, from, meta, scope, visibility);
-        if (c.labels) targets = targets.filter((id) => labelsOf(node(id).name).join(":") === c.labels!.join(":"));
+        if (c.labels) targets = targets.filter((id) => labelsFit(id, c, byObjc));
+        // Objective-C names a method by its whole selector (`@selector(presentThread:)`), often one of
+        // another object's. When the caller has none, Swift code Objective-C reaches by that name, as a
+        // message to an object of unknown type would: the one the file can see. Only a selector with
+        // arguments says enough (`@selector(reloadData)` is any table view's).
+        if (!targets.length && byObjc && c.use === "ref" && c.labels?.length) {
+          const exact = all.filter((id) => renamedForObjc(id) && labelsFit(id, c, true) && (node(id).file === c.file || visibility.canSee(c.file, node(id).file)));
+          if (exact.length === 1) targets = exact;
+        }
         if (targets.length > MAX_TARGETS) targets = [];
         if (targets.length) stats.uses++;
         onCall?.({ ...c, outcome: targets.length === 0 ? "unreachable" : targets.length === 1 ? "one" : "several", targets });
@@ -226,10 +284,14 @@ export class TreeSitterCallGraph implements CallGraphPort {
       const labelled = c.labels?.some((x) => x !== "_");
       let fitting = all;
       if (c.labels && !c.infix) {
-        const key = `${family}\n${c.name}\n${c.labels.join(":")}\n${c.closures ?? 0}`;
+        const key = `${family}\n${c.name}\n${c.labels.join(":")}\n${c.closures ?? 0}${byObjc ? "\nobjc" : ""}`;
         let fits = fittingByLabels.get(key);
         if (!fits) {
-          fits = inFamily.filter((id) => (signatures.has(id) ? acceptsLabels(signatures.get(id)!, c.labels!, c.closures) : !(labelled && properties.has(id))));
+          fits = inFamily.filter((id) =>
+            byObjc && renamedForObjc(id) ? labelsFit(id, c, true)
+            : signatures.has(id) ? acceptsLabels(signatures.get(id)!, c.labels!, c.closures)
+            : !(labelled && properties.has(id)),
+          );
           fittingByLabels.set(key, fits);
         }
         fitting = self ? fits.filter((id) => id !== from) : fits;
@@ -271,7 +333,10 @@ export class TreeSitterCallGraph implements CallGraphPort {
         }
       } else if (all.length === 0) {
         // Nothing by that name exists any more: probably a call to removed code.
-        for (const to of removedByName.get(c.name) ?? []) collector.add(from, to, "calls-removed", c.line, text);
+        const gone = byObjc
+          ? [...(removedByName.get(c.name) ?? []).filter((id) => !removedRenamed.has(id)), ...(removedByObjcName.get(c.name) ?? [])]
+          : removedByName.get(c.name) ?? [];
+        for (const to of gone) collector.add(from, to, "calls-removed", c.line, text);
       }
     };
     for (const c of calls) linkOne(c);
@@ -319,7 +384,9 @@ export class TreeSitterCallGraph implements CallGraphPort {
             const key = `${m.id}>${p.id}`;
             if (seen.has(key)) continue;
             seen.add(key);
-            collector.add(m.id, p.id, "implements", m.line, linesOf.get(m.file)?.[m.line - 1] ?? "");
+            // On the line with its name, not on an attribute before it (`@objc`, `override`).
+            const line = m.nameAt?.line ?? m.line;
+            collector.add(m.id, p.id, "implements", line, linesOf.get(m.file)?.[line - 1] ?? "");
             added++;
           }
         }
@@ -570,6 +637,8 @@ class TypeScope {
     knownParents: Record<string, string> = {},
     /** The language rules of a file. */
     private readonly specOf: (file: string) => LanguageSpec | undefined = () => undefined,
+    /** Swift types by the names Objective-C writes them with (`@objc(MYStore) class Store`: MYStore -> Store). */
+    private readonly objcTypes: ReadonlyMap<string, string> = new Map(),
   ) {
     for (const t of typeParents) {
       const key = simple(t.type);
@@ -707,7 +776,9 @@ class TypeScope {
     const key = `${caller.id}>${e}`;
     if (this.exprCache.has(key)) return this.exprCache.get(key)!;
     this.exprCache.set(key, null); // guards against `x = x.next()` loops
-    const found = this.resolveExpr(e, caller, depth);
+    let found = this.resolveExpr(e, caller, depth);
+    // Objective-C writes a Swift type by the name it has there.
+    if (found && this.objcTypes.size && this.specOf(caller.file)?.callsByObjcName) found = this.objcTypes.get(found) ?? found;
     this.exprCache.set(key, found);
     return found;
   }

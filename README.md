@@ -331,7 +331,12 @@ collapses or opens a file without marking it. In a report file the marks stay in
 your browser; on the service they are saved per person.
 
 The button in the top bar switches the colours between **Auto** (follows your
-system), **Light** and **Dark**; your choice is remembered in the browser. Drag the edge of
+system), **Light** and **Dark**; your choice is remembered in the browser. The **Xcode**
+button next to it colours the code like Xcode's own Default theme, light or dark with the
+page, in Xcode's font (SF Mono 12, where your computer has it): keywords, strings,
+comments, attributes, `#if` and `#import`, and, as in Xcode, a name being declared apart
+from one being used, and the repo's own types and functions apart from a library's. It is
+remembered too. Drag the edge of
 the left list or of the bottom panel to resize it.
 
 ---
@@ -410,9 +415,17 @@ so the two meet on one name: `- saveItem:(Item *)item completion:(Block)done` is
 `store.saveItem(item) { ... }` links to the Objective-C method; `[cache storeItem:item forKey:key]`,
 `[[Cache alloc] initWithSize:10]` and `[Logger logMessage:text]` link to Swift's
 `storeItem(_:forKey:)`, `init(size:)` and a `static func logMessage(_:)`. `@selector(didTap:)`
-counts as a use. Not followed: the further renaming Swift does when it imports Objective-C
-(`saveItem:` as `save(_:)`, `NS_SWIFT_NAME`), `@objc(otherName:)`, and headers (`.h`), which are
-still read as C.
+counts as a use. Objective-C calls Swift by the name Objective-C sees:
+`@objc(presentThread:) func presentView(_:)` is `[list presentThread:thread]` and
+`@selector(presentThread:)`, no longer `presentView:`; an `@objc` method (or `@IBAction`, or one in
+an `@objcMembers` class or an `@objc extension`) by the selector Swift makes for it:
+`present(view:)` is `presentWithView:`, `move(to:)` `moveTo:`, `init(name:)` `initWithName:`, and a
+`throws` method gets an `error:` piece, before any closures at its end; a property by its getter
+and `setName:`; and
+`@objc(MYStore) class Store` is `MYStore`. Not followed: the further renaming Swift does when it
+imports Objective-C (`saveItem:` as `save(_:)`, `NS_SWIFT_NAME`), the selector of an `override`
+or of a method that is `@objc` only because it fulfils an `@objc` protocol, and headers (`.h`),
+which are still read as C.
 
 ### Angular
 

@@ -1,5 +1,9 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll } from "vitest";
 import { changeVersion, folderTree, renderHtml, startsRtl } from "../src/interfaces/html/render-html.js";
+import { STYLE } from "../src/interfaces/html/html-style.js";
+import { XCODE_DARK, XCODE_LIGHT, XCODE_STYLE } from "../src/interfaces/html/xcode-style.js";
+import { TreeSitterEngine } from "../src/infrastructure/parsers/tree-sitter/engine.js";
+import { TreeSitterHighlighter } from "../src/infrastructure/parsers/tree-sitter/tree-sitter-highlighter.js";
 import type { AnalysisResult } from "../src/domain/analysis-result.js";
 import type { GraphNode } from "../src/domain/graph.js";
 import type { DiffLine } from "../src/domain/symbol.js";
@@ -414,5 +418,235 @@ describe("where a symbol is shown to be defined", () => {
     expect(defRow(0).split("storeItem")[0]).not.toContain("@objc");
     expect(defRow(1)).toContain("initWithName");
   });
+
+  it("is the line the parser says has the name, also when an attribute before it holds the name (roadmap 38)", () => {
+    const lines: DiffLine[] = [
+      row("ctx", 1, "class Cache {"),
+      row("ctx", 2, "  @objc(storeItem:)"),
+      row("ctx", 3, "  @MainActor"),
+      row("ctx", 4, "  func storeItem(_ item: Item) {"),
+      row("add", 5, "    print(item)"),
+      row("ctx", 6, "  }"),
+      row("ctx", 7, "\t@objc(load:) func load(_ x: Int) {}"),
+      row("del", 8, "  @objc(drop:)"),
+      row("del", 9, "  func drop(_ x: Int) {}"),
+      { type: "ctx", oldLine: 10, newLine: 8, text: "}" },
+    ];
+    const page = renderHtml({
+      base: sha("a"),
+      head: sha("b"),
+      symbols: [],
+      files: [{ path: "Cache.swift", status: "modified", lines }],
+      nodes: [
+        node("Cache.swift#Cache.storeItem(_:)", { changed: true, status: "modified", kind: "method", line: 2, endLine: 6, nameAt: { line: 4, column: 7 } }),
+        node("Cache.swift#Cache.load(_:)", { changed: true, status: "modified", kind: "method", line: 7, endLine: 7, nameAt: { line: 7, column: 19 } }),
+        node("Cache.swift#Cache.drop(_:)", { changed: true, status: "removed", kind: "method", line: 8, endLine: 9, nameAt: { line: 9, column: 7 } }),
+      ],
+      edges: [],
+    });
+    const syms = pageData(page).syms as { name: string; line: number; col?: number }[];
+    // The column is in the text as shown, where a tab is two spaces.
+    expect(syms.map((s) => [s.name, s.line, s.col])).toEqual([
+      ["Cache.storeItem(_:)", 4, 7],
+      ["Cache.load(_:)", 7, 20],
+      ["Cache.drop(_:)", 9, 7],
+    ]);
+    const defRowOf = (k: number) => page.match(new RegExp(`<div class="([^"]*)"[^>]*data-defs="${k}"[^>]*>[\\s\\S]{0,400}?</div>`))!;
+    expect(defRowOf(0)[0]).toContain("func storeItem");
+    expect(defRowOf(2)[1]).toContain("del");
+    expect(defRowOf(2)[0]).toContain("func drop");
+  });
 });
 
+
+describe("Xcode colours (roadmap 37)", () => {
+  const empty = renderHtml({ base: sha("a"), head: sha("b"), symbols: [], nodes: [], edges: [], files: [] });
+
+  it("have a button, and a saved choice is applied before the page paints", () => {
+    expect(empty).toContain('id="codestyle"');
+    expect(empty).toContain('aria-pressed="false"');
+    const boot = empty.indexOf('localStorage.getItem("diffmap:style")');
+    expect(boot).toBeGreaterThan(-1);
+    expect(boot).toBeLessThan(empty.indexOf("<body"));
+    expect(empty).toContain('setAttribute("data-style","xcode")');
+    // Next to the light / dark button, which keeps working as before.
+    expect(empty.indexOf('id="codestyle"')).toBeLessThan(empty.indexOf('id="theme"'));
+  });
+
+  it("are Xcode's Default (Light) and Default (Dark), picked by the Auto / Light / Dark choice", () => {
+    expect(empty).toMatch(/:root\[data-style="xcode"\] \{[^}]*--xc-bg:#FFFFFF;[^}]*--xc-keyword:#9B2393;/);
+    expect(empty).toMatch(/@media \(prefers-color-scheme: dark\) \{\s*:root\[data-style="xcode"\]:not\(\[data-theme="light"\]\) \{[^}]*--xc-bg:#1F1F24;[^}]*--xc-keyword:#FC5FA3;/);
+    expect(empty).toMatch(/:root\[data-style="xcode"\]\[data-theme="dark"\] \{[^}]*--xc-bg:#1F1F24;/);
+    // SF Mono 12 where the reader has it (it is never downloaded), Medium in dark and Regular in light.
+    expect(empty).toContain('--xc-mono:ui-monospace, "SF Mono", SFMono-Regular, Menlo');
+    expect(empty).toContain("font:var(--xc-weight) 12px/16px var(--xc-mono)");
+    expect([XCODE_LIGHT.weight, XCODE_LIGHT.keywordWeight, XCODE_DARK.weight, XCODE_DARK.keywordWeight]).toEqual([400, 600, 500, 700]);
+    expect(empty).not.toMatch(/\.(woff2?|ttf|otf)\b/);
+  });
+
+  it("leave diffmap's own colours as they were", () => {
+    const own = STYLE.replace(XCODE_STYLE, "");
+    expect(own).not.toMatch(/tk-(definition|type-definition|constructor|doc|mark|character|regex|preprocessor|url)|\.own\b/);
+  });
+
+  it("change the code only: not the page's fonts, the pills or the inputs", () => {
+    // Every rule is about the code (.code, .ed, .prev, its rows and tokens), or sets the palette's own --xc-* properties.
+    for (const [, selectors, body] of XCODE_STYLE.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      for (const selector of selectors.split(",").map((s) => s.trim())) {
+        if (/^:root\[data-style="xcode"\](\[data-theme="dark"\]|:not\(\[data-theme="light"\]\))?$/.test(selector)) {
+          expect(body.match(/--[\w-]+(?=:)/g)!.filter((p) => !p.startsWith("--xc-")), selector).toEqual([]);
+        } else {
+          expect(selector, selector).toMatch(/^\[data-style="xcode"\] (\.code|\.ed|\.prev|\.dl|\.tk-)/);
+        }
+      }
+    }
+  });
+
+  describe("token by token, in Swift and Objective-C", () => {
+    /** The colour Xcode's CSS gives an element with these classes: the rule with the most classes, then the last. */
+    const colourOf = (classes: string[], palette: "light" | "dark"): string => {
+      let best: { n: number; at: number; value: string } | null = null;
+      for (const m of XCODE_STYLE.matchAll(/\n\s*((?:\[data-style="xcode"\] \.[^{]+?))\s*\{([^}]*)\}/g)) {
+        const colour = /(?:^|;|\s)color:var\(--([\w-]+)\)/.exec(m[2]);
+        if (!colour) continue;
+        for (const selector of m[1].split(",")) {
+          const need = selector.replace('[data-style="xcode"]', "").trim().split(".").filter(Boolean);
+          if (need.length === 0 || need.some((c) => !classes.includes(c))) continue;
+          if (!best || need.length > best.n || (need.length === best.n && m.index > best.at)) best = { n: need.length, at: m.index, value: colour[1] };
+        }
+      }
+      const block = palette === "dark" ? /\[data-theme="dark"\] \{([^}]*)\}/.exec(XCODE_STYLE)![1] : /:root\[data-style="xcode"\] \{([^}]*)\}/.exec(XCODE_STYLE)![1];
+      return best ? new RegExp(`--${best.value}:([^;]+);`).exec(block)![1] : "plain";
+    };
+    /** The classes of the first coloured piece of code whose text is `word`. */
+    const classesOf = (html: string, word: string): string[] => {
+      const found = new RegExp(`<span class="(tk-[^"]*)">${word.replace(/"/g, "&quot;").replace(/[.*+?^$()|[\]\\]/g, "\\$&")}</span>`).exec(html);
+      expect(found, word).not.toBeNull();
+      return found![1].split(" ");
+    };
+
+    const SWIFT = [
+      "import UIKit",
+      "",
+      "// MARK: - Inbox",
+      "/// Opens a thread. See https://example.com/help.",
+      "final class InboxViewController: UIViewController {",
+      "    #if DEBUG",
+      "    let limit = 3",
+      "    #endif",
+      "    @objc(presentThread:)",
+      "    func presentView(_ thread: Thread) {",
+      '        let detail = DetailViewController(title: "x")',
+      "        print(detail)",
+      "        reload()",
+      "    }",
+      "    func reload() {}",
+      "}",
+    ];
+    const OBJC = [
+      '#import "Inbox.h"',
+      "@implementation Inbox",
+      "- (void)openThread:(NSString *)name {",
+      "    char c = 'a';",
+      "    if (self.ready == YES) { [self show:name]; }",
+      "}",
+      "@end",
+    ];
+    const view = (path: string, text: string[]) => ({
+      path,
+      status: "modified" as const,
+      lines: text.map((t, i) => row(i === 2 ? "add" : "ctx", i + 1, t)),
+    });
+    let html = "";
+    beforeAll(async () => {
+      const result: AnalysisResult = {
+        base: sha("a"),
+        head: sha("b"),
+        symbols: [],
+        nodes: [],
+        edges: [],
+        files: [view("App/Inbox.swift", SWIFT), view("App/Inbox.m", OBJC)],
+        // What the analysis found the repo defines (see AnalyzeRangeUseCase): the rest is a library's.
+        names: ["DetailViewController", "InboxViewController", "presentView", "reload"],
+      };
+      html = renderHtml(result, [new TreeSitterHighlighter(await TreeSitterEngine.load())]);
+    });
+
+    const SWIFT_WORDS: [string, keyof typeof XCODE_DARK][] = [
+      ["import", "keyword"],
+      ["func", "keyword"],
+      ["// MARK: - Inbox", "mark"],
+      ["https://example.com/help", "url"],
+      ["InboxViewController", "typeDeclaration"],
+      ["UIViewController", "otherType"],
+      ["#if", "preprocessor"],
+      ["3", "number"],
+      ["@objc(presentThread:)", "attribute"],
+      ["presentView", "otherDeclaration"],
+      ["Thread", "otherType"],
+      ["DetailViewController", "projectType"],
+      ['"x"', "string"],
+      ["print", "otherFunction"],
+      ["reload", "projectFunction"],
+    ];
+    const OBJC_WORDS: [string, keyof typeof XCODE_DARK][] = [
+      ["#import", "preprocessor"],
+      ['"Inbox.h"', "string"],
+      ["@implementation", "keyword"],
+      ["Inbox", "typeDeclaration"],
+      ["void", "keyword"],
+      ["openThread", "otherDeclaration"],
+      ["NSString", "otherType"],
+      ["'a'", "character"],
+      ["self", "keyword"],
+      ["YES", "keyword"],
+      ["show", "otherFunction"],
+      ["@end", "keyword"],
+    ];
+
+    for (const palette of ["light", "dark"] as const) {
+      const colours = palette === "dark" ? XCODE_DARK : XCODE_LIGHT;
+      it(`Swift, ${palette}`, () => {
+        for (const [word, key] of SWIFT_WORDS) expect([word, colourOf(classesOf(html, word), palette)]).toEqual([word, colours[key]]);
+        // The documentation comment around the address, in Helvetica like Xcode's.
+        expect(html).toMatch(/<span class="tk-comment tk-doc">\/\/\/ Opens a thread\. See <span class="tk-url">/);
+      });
+      it(`Objective-C, ${palette}`, () => {
+        for (const [word, key] of OBJC_WORDS) expect([word, colourOf(classesOf(html, word), palette)]).toEqual([word, colours[key]]);
+      });
+    }
+  });
+});
+
+describe("a usage written with the name Objective-C sees (roadmap 39)", () => {
+  // Objective-C calls `@objc(presentThread:) func presentView` as presentThread: that is the word to underline there.
+  const result: AnalysisResult = {
+    base: sha("a"),
+    head: sha("b"),
+    symbols: [],
+    files: [
+      {
+        path: "App/List.swift",
+        status: "modified",
+        lines: [row("ctx", 1, "class List {"), row("ctx", 2, "  @objc(presentThread:)"), row("ctx", 3, "  func presentView(_ thread: Thread) {"), row("add", 4, "    print(thread)"), row("ctx", 5, "  }"), row("ctx", 6, "  func close() {}"), row("ctx", 7, "}")],
+      },
+      { path: "App/Inbox.m", status: "modified", lines: [row("ctx", 1, "- (void)open:(List *)list {"), row("add", 2, "    [list presentThread:nil];"), row("ctx", 3, "}")] },
+    ],
+    nodes: [
+      node("App/List.swift#List.presentView(_:)", { changed: true, status: "modified", kind: "method", line: 2, endLine: 5, objcNames: ["presentThread"] }),
+      node("App/List.swift#List.close", { changed: true, status: "modified", kind: "method", line: 6, endLine: 6 }),
+      node("App/Inbox.m#Inbox.open(_:)", { kind: "method", line: 1, endLine: 3 }),
+    ],
+    edges: [{ from: "App/Inbox.m#Inbox.open(_:)", to: "App/List.swift#List.presentView(_:)", kind: "calls", sites: [{ line: 2, text: "    [list presentThread:nil];" }] }],
+  };
+  const page = renderHtml(result);
+
+  it("tells the page those words, and the page tries them after the symbol's own name", () => {
+    const syms = pageData(page).syms as { name: string; written?: string[] }[];
+    expect(syms.map((s) => [s.name, s.written])).toEqual([
+      ["List.presentView(_:)", ["presentThread"]],
+      ["List.close", undefined],
+    ]);
+    expect(page).toContain("syms[k].written");
+  });
+});

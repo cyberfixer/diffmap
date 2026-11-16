@@ -21,6 +21,18 @@ function swiftStyle(pieces: string[], takesArguments: boolean): { name: string; 
 
 const labelled = (name: string, labels: string[]): string => (labels.length ? `${name}(${labels.map((l) => `${l}:`).join("")})` : name);
 
+/**
+ * A selector written out (`presentThread:`, `initWithName:`, `sharedStore`) as the name an
+ * Objective-C call of it is read under: `presentThread(_:)`, `init(name:)`, `sharedStore`.
+ * Swift names what Objective-C sees of its own code this way (see swift.ts, `objcNames`).
+ */
+export function selectorName(selector: string): string {
+  const pieces = selector.split(":");
+  const takesArguments = pieces.length > 1;
+  const { name, labels } = swiftStyle(takesArguments ? pieces.slice(0, -1) : pieces, takesArguments);
+  return labelled(name, labels);
+}
+
 /** The parts of a method's selector, in order: `saveItem`, `completion`. */
 const selectorPieces = (method: Node): string[] => method.namedChildren.filter((c) => c.type === "identifier").map((c) => c.text);
 const methodParameters = (method: Node): Node[] => method.namedChildren.filter((c) => c.type === "method_parameter");
@@ -70,10 +82,14 @@ const message: CallRule = (n): CallShape | null => {
   return { name, receiver: on, labels, at: methods[0] };
 };
 
-/** `@selector(didTap:)` names a method without calling it. */
+/** `@selector(didTap:)` names a method without calling it; its pieces are its labels, like a message's. */
 const selector: CallRule = (n): CallShape | null => {
-  const written = /\(\s*([A-Za-z_]\w*)/.exec(n.text)?.[1];
-  return written ? { name: written, receiver: "", use: "ref" } : null;
+  const written = /\(\s*([A-Za-z_][\w:\s]*?)\s*\)/.exec(n.text)?.[1].replace(/\s+/g, "");
+  if (!written) return null;
+  const pieces = written.split(":");
+  const takesArguments = pieces.length > 1;
+  const { name, labels } = swiftStyle(takesArguments ? pieces.slice(0, -1) : pieces, takesArguments);
+  return { name, receiver: "", labels, use: "ref" };
 };
 
 export const objc: LanguageSpec = {
@@ -84,6 +100,8 @@ export const objc: LanguageSpec = {
   variableTypes: ["typeFirst", "objcParameter", "constructed"],
   // Like Swift, the files of one target see each other without naming each other.
   moduleScope: true,
+  // Swift code that Objective-C sees under another name (`@objc(presentThread:)`) is called by that name.
+  callsByObjcName: true,
   defs: {
     class_implementation: { kind: "class" },
     // In a .m file: the class extension `@interface Store () <StoreDelegate>`. It names what is in it.
@@ -95,4 +113,12 @@ export const objc: LanguageSpec = {
     function_definition: { kind: "function", name: declaratorName },
   },
   calls: { message_expression: message, selector_expression: selector, call_expression: field("function") },
+  // The grammar reads these as names or types: `self`, `YES`, `instancetype`, `@end`, `void`.
+  keywords: new Set([
+    "self", "super", "nil", "Nil", "NULL", "YES", "NO", "id", "instancetype",
+    "void", "char", "short", "int", "long", "float", "double", "signed", "unsigned", "bool",
+    "@implementation", "@interface", "@protocol", "@end", "@property", "@synthesize", "@dynamic", "@class",
+    "@selector", "@encode", "@optional", "@required", "@public", "@private", "@protected", "@package",
+    "@try", "@catch", "@finally", "@throw", "@synchronized", "@autoreleasepool",
+  ]),
 };
