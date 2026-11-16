@@ -8,6 +8,12 @@
 
 ## Done
 
+### 36. TypeScript: imports through tsconfig aliases — DONE
+- TypeScript was read without the repo's tsconfig, so an import written with `baseUrl` (`import "src/services/order.service"`) or a `paths` alias (`import "@app/..."`, `"@nestjs/common"`) pointed nowhere: the type of a service injected through it was unknown, and its calls were lost. A changed service method then showed no usage in the processor that calls it.
+- The call graph now reads every `tsconfig*.json` / `jsconfig.json` in the repo, follows `extends` between them (comments and trailing commas allowed), and resolves each file's imports with the nearest config above it, so the projects of a monorepo keep their own aliases (Nx: `tsconfig.base.json` at the root).
+- nestjs/nest (2,219 files, 154 tsconfig files): TypeScript links 4,196 -> 8,688, none lost, same time.
+- Not followed: `extends` from a package (`@tsconfig/node20`, which has no aliases of the repo), project references.
+
 ### 35. Objective-C, linked with Swift; the definition is the line with the name — DONE
 - Objective-C (`.m`, `.mm`) is a language of its own (`languages/objc.ts`): classes, categories, methods, protocols, C functions; message sends, C calls and `@selector(..)`.
 - It shares a family with Swift, and its methods are named the way Swift sees them (`saveItem(_:completion:)`, `init(name:)`), so calls link both ways: Swift to an Objective-C method (also with a trailing closure for a block), class method or class; Objective-C to Swift through `[[T alloc] initWith..]`, `[x method:..]` and `[T classMethod:..]`.

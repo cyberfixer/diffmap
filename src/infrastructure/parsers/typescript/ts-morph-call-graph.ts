@@ -7,6 +7,7 @@ import type {
 import type { GraphEdge, GraphNode } from "../../../domain/graph.js";
 import { CallCollector, walkNeighbourhood } from "../../../application/call-graph-walk.js";
 import { listSymbolNodes } from "./symbols.js";
+import { TsConfigResolution, isTsConfig } from "./tsconfig-resolution.js";
 
 export class TsMorphCallGraph implements CallGraphPort {
   readonly supportedExtensions = [".ts", ".tsx"] as const;
@@ -15,12 +16,20 @@ export class TsMorphCallGraph implements CallGraphPort {
     return true; // the TypeScript type checker resolves every call
   }
 
+  /** tsconfig.json and its kind: `baseUrl` and `paths` decide where `import "@app/x"` points. */
+  wantsConfig(path: string): boolean {
+    return isTsConfig(path);
+  }
+
   build(input: CallGraphInput): CallGraphResult {
     // Load the whole repo at head into memory so the type checker can resolve
     // calls across files (this.service.update() -> Service.update).
+    // The repo's own tsconfig files, for `import "src/x"` (baseUrl) and `import "@app/x"` (paths).
+    const resolution = new TsConfigResolution(input.configs ?? []);
     const project = new Project({
       useInMemoryFileSystem: true,
       skipAddingFilesFromTsConfig: true,
+      ...(resolution.any ? { resolutionHost: resolution.host() } : {}),
       compilerOptions: {
         target: ts.ScriptTarget.ES2022,
         moduleResolution: ts.ModuleResolutionKind.Node10,
