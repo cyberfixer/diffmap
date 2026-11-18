@@ -24,5 +24,6 @@ export const csharp: LanguageSpec = {
         (n.childForFieldName("accessors")?.namedChildren.some((a) => a.namedChildren.length > 0) ?? false),
     },
   },
+  typeName: (n) => n.type === "identifier" && n.parent && (/^(base_list|type_argument_list|nullable_type|array_type)$/.test(n.parent.type) || n.parent.childForFieldName("type")?.id === n.id) ? n.text : null,
   calls: { invocation_expression: field("function"), object_creation_expression: field("type") },
 };

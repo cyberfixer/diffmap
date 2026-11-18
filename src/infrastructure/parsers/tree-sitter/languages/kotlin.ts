@@ -1,7 +1,7 @@
 /** Kotlin. Rules for this language only: changing them changes no other language. */
 import type { Node } from "../node.js";
 import type { CallRule, LanguageSpec } from "./spec.js";
-import { blank, firstChild, firstIdent, keyword, parentsIn, returnsAfter } from "./shared.js";
+import { blank, capitalised, firstChild, firstIdent, keyword, parentsIn, returnsAfter, typeIdentifier } from "./shared.js";
 
 /** Kotlin modifiers the bundled grammar cannot read as a name (`internal.run()`, `open = 1`, `{ override -> }`). */
 const KOTLIN_MODIFIER_NAMES =
@@ -89,5 +89,6 @@ export const kotlin: LanguageSpec = {
       },
     },
   },
+  typeName: (n) => typeIdentifier(n) ?? (n.type === "navigation_expression" ? capitalised(n.namedChildren[0]?.type === "simple_identifier" ? n.namedChildren[0] : null) : null),
   calls: { call_expression: firstChild, infix_expression: kotlinInfix },
 };

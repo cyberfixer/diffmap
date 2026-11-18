@@ -106,4 +106,18 @@ export const returnsAfter = (token: string) => (n: Node) => {
 /** True when the node has this keyword as a direct child (Kotlin `interface X`, `enum class X`). */
 export const keyword = (n: Node, word: string) => n.children.some((c) => c.type === word);
 
+/** The usual tree-sitter node for a type's name, in most grammars. */
+export const typeIdentifier = (n: Node): string | null => (n.type === "type_identifier" ? n.text : null);
+
+/** A name written after `std::`, `core::` or `alloc::` (C++, Rust): the standard library's, never the repo's. */
+export const inStandardLibrary = (n: Node): boolean => {
+  const p = n.parent;
+  if (!p || !/^(qualified_identifier|scoped_type_identifier|scoped_identifier)$/.test(p.type)) return false;
+  const path = p.childForFieldName("scope") ?? p.childForFieldName("path");
+  return !!path && path.id !== n.id && /^(::)?(std|core|alloc)\b/.test(path.text);
+};
+
+/** `Kind.ONLINE`, `Kind::Online`: a capitalised name in front of a member is a type (an enum, a class's statics). */
+export const capitalised = (n: Node | null | undefined): string | null => (n && /^[A-Z][A-Za-z0-9_]*$/.test(n.text) ? n.text : null);
+
 export const blank = (m: string): string => m.replace(/[^\n]/g, " ");

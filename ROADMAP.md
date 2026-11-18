@@ -8,6 +8,12 @@
 
 ## Done
 
+### 41. Where a type is used, in every language — DONE
+- What #40 did for TypeScript, for the languages read with tree-sitter: a changed class, struct, enum, interface, protocol or trait shows who writes it (a field, a parameter or return type, inside a generic, a parent type, an enum through its members such as `Kind.ONLINE` / `Kind::Online`). The same `uses-type` link, followed from the type to its users only.
+- Each language says where its code writes a type's name (`typeName` in its file): `type_identifier` in Java, Kotlin, Swift, Rust, Go, Scala, C, C++ and Objective-C; type positions in C# and Python. A definition's own name, a member naming its own type (Go's receiver `(p *Pay)`) and `std::` / `core::` names are left out. Linked like calls: the same file, then what the file can see, else a name the repo has once; at most five.
+- Calls are link for link the same (mall, Alamofire, ios-oss, nlohmann/json). Type links added: mall 11,676, ios-oss 29,809, Alamofire 3,374, nlohmann/json 3,372. Whole-repo linking takes the same time (Signal-Android 49 s, ios-oss 19 s).
+- Not done: Ruby, PHP and JavaScript (types are not written), a Rust `impl Trait for X` (outside any symbol), C++ classes in `.h` files (read as C).
+
 ### 40. TypeScript: where a type is used — DONE
 - Only calls counted as usages, so a changed `interface`, `enum` or class used as a type showed none, and `type X = ...` was not a symbol at all (its change went to "top-level code"; the rest of roadmap item 4).
 - Type aliases are symbols (`type`). A new kind of link, `uses-type`, says who writes a type: a parameter or return type, a field, inside a generic (`Promise<Order[]>`), `extends` / `implements`, and an enum through its members (`Kind.Online`). A type this diff removed that is still written is a use of removed code.

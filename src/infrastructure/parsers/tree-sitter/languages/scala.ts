@@ -1,6 +1,6 @@
 /** Scala. Rules for this language only: changing them changes no other language. */
 import type { LanguageSpec } from "./spec.js";
-import { field, firstChild, parentsIn, returnsIn } from "./shared.js";
+import { field, firstChild, parentsIn, returnsIn, typeIdentifier } from "./shared.js";
 
 export const scala: LanguageSpec = {
   id: "scala",
@@ -13,5 +13,6 @@ export const scala: LanguageSpec = {
     trait_definition: { kind: "trait", supers: parentsIn("extends_clause") },
     function_definition: { kind: "function", returns: returnsIn("return_type") },
   },
+  typeName: typeIdentifier,
   calls: { call_expression: field("function"), instance_expression: firstChild },
 };

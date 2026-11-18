@@ -10,5 +10,6 @@ export const python: LanguageSpec = {
     function_definition: { kind: "function", returns: returnsIn("return_type") },
     class_definition: { kind: "class", supers: parentsIn("argument_list") }, // class A(Base, Mixin)
   },
+  typeName: (n) => n.type === "identifier" && (n.parent?.type === "type" || n.parent?.parent?.type === "type" || (n.parent?.type === "argument_list" && n.parent.parent?.type === "class_definition")) ? n.text : null,
   calls: { call: field("function") },
 };

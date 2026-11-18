@@ -1,7 +1,7 @@
 /** Objective-C. Rules for this language only: changing them changes no other language. */
 import type { Node } from "../node.js";
 import type { CallRule, CallShape, LanguageSpec, Param } from "./spec.js";
-import { field } from "./shared.js";
+import { field, typeIdentifier } from "./shared.js";
 import { declaratorName } from "./c.js";
 
 /**
@@ -112,6 +112,7 @@ export const objc: LanguageSpec = {
     method_declaration: { kind: "method", name: methodName, signature: methodSignature, when: (n) => n.parent?.type === "protocol_declaration" },
     function_definition: { kind: "function", name: declaratorName },
   },
+  typeName: typeIdentifier,
   calls: { message_expression: message, selector_expression: selector, call_expression: field("function") },
   // The grammar reads these as names or types: `self`, `YES`, `instancetype`, `@end`, `void`.
   keywords: new Set([
