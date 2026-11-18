@@ -8,6 +8,13 @@
 
 ## Done
 
+### 40. TypeScript: where a type is used — DONE
+- Only calls counted as usages, so a changed `interface`, `enum` or class used as a type showed none, and `type X = ...` was not a symbol at all (its change went to "top-level code"; the rest of roadmap item 4).
+- Type aliases are symbols (`type`). A new kind of link, `uses-type`, says who writes a type: a parameter or return type, a field, inside a generic (`Promise<Order[]>`), `extends` / `implements`, and an enum through its members (`Kind.Online`). A type this diff removed that is still written is a use of removed code.
+- It is followed one way only: from a changed type to who uses it, never from a changed function to the types it mentions, so the map does not fill up with every function's parameter types.
+- The page tags such usages "type" and says "Nothing uses this type." when there are none.
+- nestjs/nest: calls unchanged (8,688), 6,182 type uses added; linking the whole repo 8.6 s -> 9.8 s. Two real changes: 2 and 16 type links more on the map.
+
 ### 39. Objective-C calls Swift by the name Objective-C sees — DONE
 - Fahad's case: `@objc(presentThread:) func presentView(_ thread: Thread)` is called from Objective-C as `[list presentThread:thread]` and `@selector(presentThread:)`. Objective-C's methods were named the way Swift sees them (35), but Swift's were not named the way Objective-C sees them, so these calls met nothing (and `[list presentView:thread]`, which Objective-C cannot write, was linked).
 - A Swift declaration that Objective-C can be seen to reach (`@objc`, `@IBAction`, `@IBOutlet`, `@NSManaged`..., in an `@objcMembers` class, an `@objc extension` or an `@objc protocol`; not `@nonobjc`) now has the names Objective-C calls it by (`objcNames` in swift.ts): the one `@objc(..)` gives, else the selector the Swift compiler makes, by its rules (`getObjCSelector` in lib/AST/Decl.cpp, prepositions from lib/Basic/PartsOfSpeech.def): `present(view:)` -> `presentWithView:`, `move(to:)` -> `moveTo:`, `init(name:)` -> `initWithName:`, `present(_:animated:)` -> `present:animated:`, `throws` -> `..error:` / `..AndReturnError:`, before any closures at the end (`fetch(id:completion:)` -> `fetchWithId:error:completion:`, errorParameterIndex in lib/Sema/TypeCheckDeclObjC.cpp), `async` -> `..completionHandler:`. Backticks are left out (``h(`default`:)`` -> `hWithDefault:`). A property: its getter and `setName:`. A type: `@objc(MYStore) class Store` is `MYStore` in Objective-C code.

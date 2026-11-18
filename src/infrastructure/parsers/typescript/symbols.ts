@@ -46,6 +46,9 @@ export function listSymbolNodes(sourceFile: SourceFile): SymbolNode[] {
       const owner = node.getFirstAncestorByKind(SyntaxKind.InterfaceDeclaration);
       name = owner ? `${owner.getName()}.${node.getName()}` : node.getName();
       kind = "method";
+    } else if (Node.isTypeAliasDeclaration(node)) {
+      name = node.getName();
+      kind = "type";
     } else if (Node.isEnumDeclaration(node)) {
       name = node.getName();
       kind = "enum";

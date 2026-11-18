@@ -417,7 +417,7 @@ export const CLIENT_SCRIPT = `
     if (facts.length) what.appendChild(h('span', 'wf' + (sy.status === 'removed' && n ? ' bad' : ''), '· ' + facts.join(' · ')));
 
     // The usages grouped by file: one short line each. (The definition is in the code above.)
-    if (!n) ulist.appendChild(h('div', 'none', 'Nothing calls this symbol.'));
+    if (!n) ulist.appendChild(h('div', 'none', /^(interface|type|enum)$/.test(sy.kind) ? 'Nothing uses this type.' : 'Nothing calls this symbol.'));
     var last = null;
     sy.refs.forEach(function (r, i) {
       if (r.file !== last) { ulist.appendChild(h('div', 'rf mono' + (r.out ? ' out' : ''), lp(r.file))); last = r.file; }
@@ -426,6 +426,7 @@ export const CLIENT_SCRIPT = `
       b.appendChild(h('span', 'rn', String(r.line)));
       b.appendChild(h('span', 'rt', r.text.trim()));
       if (r.impl) b.appendChild(h('span', 'tag', 'implements'));
+      if (r.type) b.appendChild(h('span', 'tag', 'type'));
       b.addEventListener('click', function () { refAt = i; renderDock(); });
       ulist.appendChild(b);
     });

@@ -84,6 +84,7 @@ const KIND_LABEL: Record<string, string> = {
   class: "class",
   arrow: "arrow function",
   interface: "interface",
+  type: "type",
   struct: "struct",
   enum: "enum",
   trait: "trait",
@@ -328,6 +329,7 @@ interface Ref {
   out: boolean; // the caller's file is outside the diff
   bad: boolean; // a call to code this diff removed
   impl: boolean; // the caller implements this symbol (interface method -> class method)
+  type?: boolean; // the caller writes this type (it does not call it)
 }
 
 interface SymInfo {
@@ -449,6 +451,7 @@ export function renderHtml(
         out: !inDiff,
         bad: e.kind === "calls-removed",
         impl: e.kind === "implements",
+        ...(e.kind === "uses-type" ? { type: true } : {}),
       });
     }
   }

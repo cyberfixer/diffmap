@@ -31,8 +31,10 @@ export interface GraphEdge {
    * "calls": ordinary call resolved at head.
    * "calls-removed": a call at head to a symbol the diff removed (possible breakage).
    * "implements": `from` implements `to` (a class method implementing an interface method).
+   * "uses-type": `from` writes the type `to` (`order: Order`, `implements Repo`, `Kind.Online`).
+   *   Followed from a changed type to who uses it, never from a changed function to the types it mentions.
    */
-  kind: "calls" | "calls-removed" | "implements";
+  kind: "calls" | "calls-removed" | "implements" | "uses-type";
   /** Where in the caller the call is made (head line numbers). */
   sites?: CallSite[];
 }

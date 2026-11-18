@@ -4,6 +4,7 @@ export type SymbolKind =
   | "class"
   | "arrow"       // arrow function assigned to a variable/property
   | "interface"
+  | "type"        // a type alias (TypeScript `type Status = ...`)
   | "struct"
   | "enum"
   | "trait"
