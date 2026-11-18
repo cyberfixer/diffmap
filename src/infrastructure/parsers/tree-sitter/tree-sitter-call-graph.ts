@@ -133,6 +133,7 @@ export class TreeSitterCallGraph implements CallGraphPort {
     const signatures = new Map<string, Param[]>(); // symbol id -> its parameters one by one (Swift)
     const objcAliases = new Map<string, string[]>(); // symbol id -> the names Objective-C calls it by (Swift)
     const outlines = new Map<string, Outline>();
+    const typeRefs: { file: string; from: string; name: string; line: number }[] = [];
     for (const f of files) {
       const outline = this.engine.outline(f.path, f.source);
       // Kept for the second look below, so that it need not find the symbols again.
@@ -155,6 +156,7 @@ export class TreeSitterCallGraph implements CallGraphPort {
         byName.set(key, [...(byName.get(key) ?? []), id]);
       }
       for (const c of found) calls.push({ file: f.path, ...c });
+      for (const t of outline.typeRefs) typeRefs.push({ file: f.path, ...t });
     }
     // A second look (Swift): reads of properties with code, and functions passed by name.
     const names = { properties: new Set<string>(), functions: new Set<string>() };
@@ -343,6 +345,27 @@ export class TreeSitterCallGraph implements CallGraphPort {
     // The second look, one file at a time: a big repo has many more uses than calls, too many to keep.
     if (names.properties.size || names.functions.size) {
       for (const f of files) for (const u of this.engine.uses(f.path, f.source, names, outlines.get(f.path))) linkOne({ file: f.path, ...u });
+    }
+    // Where a type is written: who uses it (a field, a parameter, `extends`, `List<Order>`).
+    // Followed from a changed type to its users only (see walkNeighbourhood).
+    for (const t of typeRefs) {
+      const from = `${t.file}#${t.from}`;
+      // A member naming its own type (Go's receiver `(p *Pay)`, `Pay.make()` inside Pay) is not a user of it.
+      const own = meta.has(from) ? scope.ownerOf(from) : "";
+      const types = candidates(familyOf(t.file), t.name).filter((id) => id !== from && TYPE_KINDS.has(node(id).kind) && node(id).name !== own);
+      const text = linesOf.get(t.file)?.[t.line - 1] ?? "";
+      if (!types.length) {
+        // Nothing of that name any more: a type this diff removed, still written here.
+        if (!byName.has(t.name)) for (const to of removedByName.get(t.name) ?? []) collector.add(from, to, "calls-removed", t.line, text);
+        continue;
+      }
+      // The same file first, then what the file can see; else only a name the repo has once.
+      const local = types.filter((id) => node(id).file === t.file);
+      let targets = local.length ? local : types.filter((id) => visibility.canSee(t.file, node(id).file));
+      if (!targets.length) targets = types.length === 1 ? [...types] : [];
+      targets = visibility.preferImported(t.file, targets, (id) => node(id).file, true);
+      if (targets.length > MAX_TARGETS) continue;
+      for (const to of targets) collector.add(from, to, "uses-type", t.line, text);
     }
     stats.implementsLinks = this.linkImplementations(typeParents, meta, linesOf, scope, visibility, collector);
     return { meta, linesOf, collector, stats };

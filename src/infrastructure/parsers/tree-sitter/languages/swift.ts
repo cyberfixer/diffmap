@@ -1,7 +1,7 @@
 /** Swift and iOS code. Rules for this language only: changing them changes no other language. */
 import type { Node } from "../node.js";
 import type { Param, CallShape, UseNames, LanguageSpec } from "./spec.js";
-import { blank, lastName, parentsIn, returnsAfter } from "./shared.js";
+import { blank, capitalised, lastName, parentsIn, returnsAfter, typeIdentifier } from "./shared.js";
 import { selectorName } from "./objc.js";
 
 /**
@@ -488,6 +488,7 @@ export const swift: LanguageSpec = {
     // var title: String { get } in a protocol, so that implementations link to it
     protocol_property_declaration: { kind: "method", name: swiftPropertyName, property: true, objcNames: swiftObjcNames },
   },
+  typeName: (n) => typeIdentifier(n) ?? (n.type === "navigation_expression" ? capitalised(n.childForFieldName("target")?.type === "simple_identifier" ? n.childForFieldName("target") : null) : null),
   calls: { call_expression: swiftCall, selector_expression: swiftSelector },
   uses: { simple_identifier: swiftNameUse, navigation_expression: swiftMemberUse },
 };

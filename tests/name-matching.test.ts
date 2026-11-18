@@ -902,3 +902,77 @@ describe("Objective-C calls Swift by the name Objective-C sees (roadmap 39)", ()
     ]);
   });
 });
+
+describe("where a type is used, in every language (roadmap 41)", () => {
+  /** Who writes the type `target`, when only it changed. */
+  function usersOf(files: Record<string, string>, target: string, kind = "uses-type"): string[] {
+    const r = graph.build({ files: Object.entries(files).map(([path, source]) => ({ path, source })), changedIds: [target], removed: [], depth: 1 });
+    return r.edges.filter((e) => e.to === target && e.kind === kind).map((e) => e.from.split("#")[1]).sort();
+  }
+  const cases: [string, Record<string, string>, string, string[]][] = [
+    ["Java: field, parameter, generic, enum constant", {
+      "app/Order.java": "public class Order {\n  int total;\n}\n",
+      "app/Kind.java": "public enum Kind { ONLINE, SHOP }\n",
+      "app/Pay.java": "public class Pay {\n  private Order last;\n  java.util.List<Order> all(Order o) { Kind k = Kind.ONLINE; return null; }\n}\n",
+    }, "app/Order.java#Order", ["Pay", "Pay.all"]],
+    ["Java: an enum through one of its constants", {
+      "app/Kind.java": "public enum Kind { ONLINE, SHOP }\n",
+      "app/Pay.java": "public class Pay {\n  boolean online(Object k) { return k == Kind.ONLINE; }\n}\n",
+    }, "app/Kind.java#Kind", ["Pay.online"]],
+    ["Kotlin: constructor property, nullable field, return type", {
+      "app/Order.kt": "data class Order(val total: Int)\n",
+      "app/Pay.kt": "class Pay(val o: Order) {\n  private var last: Order? = null\n  fun all(): List<Order> = listOf()\n}\n",
+    }, "app/Order.kt#Order", ["Pay", "Pay.all"]],
+    ["Swift: protocol adopted, optional field, array return", {
+      "App/Order.swift": "struct Order {\n  let total: Int\n}\nprotocol Repo {}\n",
+      "App/Pay.swift": "class Pay: Repo {\n  var last: Order?\n  func all() -> [Order] { [] }\n}\n",
+    }, "App/Order.swift#Order", ["Pay", "Pay.all"]],
+    ["Rust: field, reference, Kind::Online", {
+      "src/order.rs": "pub struct Order { pub total: u32 }\npub enum Kind { Online, Shop }\n",
+      "src/pay.rs": "use crate::order::{Order, Kind};\npub struct Pay { last: Order }\nimpl Pay {\n  fn all(&self, o: &Order) -> Kind { Kind::Online }\n}\n",
+    }, "src/order.rs#Kind", ["Pay.all"]],
+    ["C#: base list, field, generic", {
+      "App/Order.cs": "public class Order { public int Total; }\n",
+      "App/Pay.cs": "public class Pay {\n  private Order last;\n  List<Order> All() { return null; }\n}\n",
+    }, "App/Order.cs#Order", ["Pay", "Pay.All"]],
+    ["Python: annotations and a base class", {
+      "app/order.py": "class Order:\n    total: int\n",
+      "app/pay.py": "from app.order import Order\n\nclass Pay(Order):\n    def all(self, o: Order) -> list[Order]:\n        return []\n",
+    }, "app/order.py#Order", ["Pay", "Pay.all"]],
+    ["Go: a field and a parameter, not the methods' own receiver", {
+      "app/order.go": "package app\ntype Order struct { Total int }\nfunc (o *Order) Sum() int { return o.Total }\n",
+      "app/pay.go": "package app\ntype Pay struct { last Order }\nfunc (p *Pay) All(o Order) []Order { return nil }\n",
+    }, "app/order.go#Order", ["Pay", "Pay.All"]],
+    ["C++: a field and a parameter; std::string is not the repo's string", {
+      "src/order.hpp": "class Order { public: int total; };\nclass string {};\n",
+      "src/pay.cpp": '#include "order.hpp"\nclass Pay {\n  Order last;\n  std::string name;\n  int all(const Order& o) { return 0; }\n};\n',
+    }, "src/order.hpp#Order", ["Pay", "Pay.all"]],
+  ];
+  for (const [what, files, target, expected] of cases) {
+    it(what, () => expect(usersOf(files, target)).toEqual(expected));
+  }
+
+  it("C++: std::string is not linked to a class of the repo named string", () => {
+    const files = { "src/s.hpp": "class string {};\n", "src/pay.cpp": '#include "s.hpp"\nclass Pay {\n  std::string name;\n};\n' };
+    expect(usersOf(files, "src/s.hpp#string")).toEqual([]);
+  });
+
+  it("a removed type still written is a use of removed code", () => {
+    const r = graph.build({
+      files: [{ path: "app/Pay.java", source: "public class Pay {\n  private Order last;\n}\n" }],
+      changedIds: [],
+      removed: [{ id: "app/Order.java#Order", name: "Order" }],
+      depth: 1,
+    });
+    expect(r.edges.map((e) => `${e.from.split("#")[1]} ${e.kind} ${e.to.split("#")[1]}`)).toEqual(["Pay calls-removed Order"]);
+  });
+
+  it("a changed method does not bring in the types it mentions", () => {
+    const files = {
+      "app/Order.java": "public class Order {\n  int total;\n}\n",
+      "app/Pay.java": "public class Pay {\n  int all(Order o) { return 1; }\n}\n",
+    };
+    const r = graph.build({ files: Object.entries(files).map(([path, source]) => ({ path, source })), changedIds: ["app/Pay.java#Pay.all"], removed: [], depth: 1 });
+    expect(r.nodes.map((n) => n.id)).toEqual(["app/Pay.java#Pay.all"]);
+  });
+});

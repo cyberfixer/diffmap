@@ -1,6 +1,6 @@
 /** Go. Rules for this language only: changing them changes no other language. */
 import type { LanguageSpec } from "./spec.js";
-import { field, returnsIn } from "./shared.js";
+import { field, returnsIn, typeIdentifier } from "./shared.js";
 
 export const go: LanguageSpec = {
   id: "go",
@@ -25,5 +25,6 @@ export const go: LanguageSpec = {
       when: (n) => /^(struct_type|interface_type)$/.test(n.childForFieldName("type")?.type ?? ""),
     },
   },
+  typeName: typeIdentifier,
   calls: { call_expression: field("function") },
 };

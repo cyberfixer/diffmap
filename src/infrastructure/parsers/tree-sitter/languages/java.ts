@@ -1,6 +1,6 @@
 /** Java. Rules for this language only: changing them changes no other language. */
 import type { LanguageSpec } from "./spec.js";
-import { field, lastName, parentsIn, returnsIn } from "./shared.js";
+import { capitalised, field, lastName, parentsIn, returnsIn, typeIdentifier } from "./shared.js";
 
 export const java: LanguageSpec = {
   id: "java",
@@ -16,6 +16,7 @@ export const java: LanguageSpec = {
     constructor_declaration: { kind: "method" },
   },
   methodsAreWritten: true,
+  typeName: (n) => typeIdentifier(n) ?? (n.type === "field_access" ? capitalised(n.childForFieldName("object")) : null),
   calls: {
     method_invocation: field("name"),
     object_creation_expression: field("type"),

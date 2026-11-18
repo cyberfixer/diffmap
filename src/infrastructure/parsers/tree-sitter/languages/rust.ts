@@ -1,6 +1,6 @@
 /** Rust. Rules for this language only: changing them changes no other language. */
 import type { LanguageSpec } from "./spec.js";
-import { fieldName, returnsIn, scopedCall } from "./shared.js";
+import { capitalised, fieldName, inStandardLibrary, returnsIn, scopedCall, typeIdentifier } from "./shared.js";
 
 /** Methods of Rust's standard traits and of Option, Result, iterators and collections. */
 const RUST_COMMON_METHODS: ReadonlySet<string> = new Set(
@@ -35,6 +35,7 @@ export const rust: LanguageSpec = {
       },
     },
   },
+  typeName: (n) => (inStandardLibrary(n) ? null : typeIdentifier(n)) ?? (n.type === "scoped_identifier" ? capitalised(n.childForFieldName("path")) : null),
   calls: { call_expression: scopedCall("path") },
   methodsAreWritten: true,
   everyTypeHas: RUST_COMMON_METHODS,

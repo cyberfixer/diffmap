@@ -44,6 +44,8 @@ export interface TypeParents {
 export interface Outline {
   symbols: SymbolInfo[];
   calls: FoundCall[];
+  /** Where the code writes a type's name: the symbol it is written in, the name, its line. */
+  typeRefs: { from: string; name: string; line: number }[];
   parents: TypeParents[];
   /** Where each symbol starts and ends in the text (character offsets), in the order of `symbols`. */
   spans: [number, number][];
@@ -218,10 +220,11 @@ export class TreeSitterEngine {
           symbols: found.map((s) => s.info),
           spans: found.map((s) => [s.start, s.end]),
           calls: listCalls(root, spec, found),
+          typeRefs: listTypeRefs(root, spec, found),
           parents, returns, params, properties, statics, signatures,
         };
         return spec.restore ? restored(outline, spec.restore) : outline;
-      }) ?? { symbols: [], spans: [], calls: [], parents: [], returns: {}, params: {}, properties: [], statics: [], signatures: {} }
+      }) ?? { symbols: [], spans: [], calls: [], typeRefs: [], parents: [], returns: {}, params: {}, properties: [], statics: [], signatures: {} }
     );
   }
 
@@ -442,6 +445,39 @@ function nameLine(call: Node, head: string, name: string): number {
 }
 
 /** Calls in a file; with `names`, the uses that are not calls instead (see TreeSitterEngine.uses). */
+/** Where the code writes a type's name (see LanguageSpec.typeName), by the innermost symbol around it. */
+function listTypeRefs(root: Node, spec: LanguageSpec, symbols: Found[]): { from: string; name: string; line: number }[] {
+  const typeName = spec.typeName;
+  if (!typeName) return [];
+  const out: { from: string; name: string; line: number }[] = [];
+  const bySpan = new Map(symbols.map((s) => [`${s.start}:${s.end}`, s]));
+  const seen = new Set<string>();
+  const walk = (node: Node, owner: Found | null): void => {
+    const here = bySpan.get(`${node.startIndex}:${node.endIndex}`) ?? owner;
+    const name = typeName(node);
+    if (name && here && !namesItsParent(node, name, spec)) {
+      const line = node.startPosition.row + 1;
+      const key = `${here.info.name}\n${name}\n${line}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        out.push({ from: here.info.name, name, line });
+      }
+    }
+    for (const child of node.namedChildren) walk(child, here);
+  };
+  walk(root, null);
+  return out;
+}
+
+/** True when `node` is the name a definition gives itself (`class Order`), not a use of the type. */
+function namesItsParent(node: Node, name: string, spec: LanguageSpec): boolean {
+  const parent = node.parent;
+  const rule = parent ? spec.defs[parent.type] : undefined;
+  if (!parent || !rule || rule.when?.(parent) === false) return false;
+  const own = rule.name ? rule.name(parent) : (parent.childForFieldName("name")?.text ?? firstIdent(parent));
+  return !!own && (own.split(".").pop() ?? own).replace(/[(<].*$/, "") === name;
+}
+
 function listCalls(root: Node, spec: LanguageSpec, symbols: Found[], names?: UseNames): FoundCall[] {
   const out: FoundCall[] = [];
   const walk = (node: Node): void => {

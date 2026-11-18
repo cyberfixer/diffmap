@@ -120,6 +120,11 @@ export interface LanguageSpec {
   defs: Record<string, DefRule>;
   calls: Record<string, CallRule>;
   /**
+   * Where the code writes the name of a type (`Order o`, `o: Order`, `List<Order>`, `extends Base`):
+   * the name, or null. A definition's own name is left out by the engine. Without it, no type uses.
+   */
+  typeName?: (n: Node) => string | null;
+  /**
    * Uses that are not calls, by node type: property reads and functions passed by name.
    * They need the names of the repo's properties and functions, so they are
    * collected in a second look at each file (see TreeSitterEngine.uses).

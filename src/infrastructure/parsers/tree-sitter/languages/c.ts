@@ -1,7 +1,7 @@
 /** C. Rules for this language only: changing them changes no other language. */
 import type { Node } from "../node.js";
 import type { LanguageSpec } from "./spec.js";
-import { field, hasBody, returnsIn } from "./shared.js";
+import { field, hasBody, returnsIn, typeIdentifier } from "./shared.js";
 
 /** C/C++: the name sits inside the declarator chain, e.g. `int Svc::update(int x)`. */
 export function declaratorName(n: Node): string | null {
@@ -19,5 +19,6 @@ export const c: LanguageSpec = {
     function_definition: { kind: "function", name: declaratorName, returns: returnsIn("type") },
     struct_specifier: { kind: "struct", when: hasBody },
   },
+  typeName: typeIdentifier,
   calls: { call_expression: field("function") },
 };

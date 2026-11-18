@@ -628,8 +628,10 @@ describe("Swift uses that are not calls", () => {
       "App/Screen.swift": "struct Screen: Titled {\n  var title: String { \"Home\" }\n}\n",
     };
     const { collector } = graph.link(Object.entries(files).map(([path, source]) => ({ path, source })));
-    expect([...collector.calls.values()].map((e) => `${e.kind} ${e.from} -> ${e.to}`)).toEqual([
+    expect([...collector.calls.values()].map((e) => `${e.kind} ${e.from} -> ${e.to}`).sort()).toEqual([
       "implements App/Screen.swift#Screen.title -> App/Titled.swift#Titled.title",
+      // and the type adopts the protocol (roadmap 41)
+      "uses-type App/Screen.swift#Screen -> App/Titled.swift#Titled",
     ]);
   });
 });
