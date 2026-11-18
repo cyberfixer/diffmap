@@ -201,9 +201,6 @@
 
 ## Next
 
-### 4. `type` aliases are not symbols (rest of item 4)
-- Interfaces and enums are symbols now; TypeScript `type X = ...` still falls into `top-level`.
-
 ### 17. Clearer waiting and capacity
 - Show "waiting for N other merge requests" on the progress screen when all analysis slots are busy (today it already says "Analysing").
 - Default `ANALYSIS_WORKERS` to the number of CPU cores instead of 2.
@@ -229,4 +226,4 @@
 
 ## Suggested order
 
-Then the real tests above. Then 4 → 17, which make day-to-day reviews more accurate. 19, 7, 9 and 20 after that, in any order.
+Then the real tests above. Then 17, which make day-to-day reviews more accurate. 19, 7, 9 and 20 after that, in any order.
