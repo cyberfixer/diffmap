@@ -37,7 +37,8 @@ export function walkNeighbourhood(input: {
   const between = new Map<string, ResolvedCall[]>();
   for (const e of calls.values()) {
     if (e.kind === "calls-removed") continue;
-    (out.get(e.from) ?? out.set(e.from, new Set()).get(e.from)!).add(e.to);
+    // Who uses a changed type is its neighbour; the types a changed function mentions are not.
+    if (e.kind !== "uses-type") (out.get(e.from) ?? out.set(e.from, new Set()).get(e.from)!).add(e.to);
     (inn.get(e.to) ?? inn.set(e.to, new Set()).get(e.to)!).add(e.from);
     const pair = `${e.from}>${e.to}`;
     between.set(pair, [...(between.get(pair) ?? []), e]);

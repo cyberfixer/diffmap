@@ -112,6 +112,40 @@ export class TsMorphCallGraph implements CallGraphPort {
       }
     }
 
+    // Where a type is written: `order: Order`, `Promise<Order>`, `implements Repo`, `extends Base`,
+    // and an enum's members (`Kind.Online`). A use of the type, not a call.
+    const typeOf = (name: Node): { to?: string; unresolved: boolean } => {
+      let sym = name.getSymbol();
+      if (sym?.isAlias()) sym = sym.getAliasedSymbol() ?? sym;
+      const decls = sym?.getDeclarations() ?? [];
+      return { to: decls.map((d) => idOf.get(d)).find((id) => id !== undefined), unresolved: decls.length === 0 };
+    };
+    const TYPE_KINDS = new Set(["class", "interface", "type", "enum"]);
+    for (const sf of project.getSourceFiles()) {
+      const written: Node[] = [
+        ...sf.getDescendantsOfKind(SyntaxKind.TypeReference).map((r) => r.getTypeName()),
+        // class A extends Base implements Repo / interface B extends A
+        ...sf.getDescendantsOfKind(SyntaxKind.ExpressionWithTypeArguments).map((e) => e.getExpression()),
+        // Kind.Online: the enum, through one of its members
+        ...sf
+          .getDescendantsOfKind(SyntaxKind.PropertyAccessExpression)
+          .filter((p) => !Node.isCallExpression(p.getParent()) && Node.isIdentifier(p.getExpression()))
+          .map((p) => p.getExpression()),
+      ];
+      for (const name of written) {
+        const from = enclosingSymbol(name, idOf);
+        if (!from) continue;
+        const last = Node.isQualifiedName(name) ? name.getRight() : Node.isPropertyAccessExpression(name) ? name.getNameNode() : name;
+        const { to, unresolved } = typeOf(last);
+        if (to) {
+          if (TYPE_KINDS.has(meta.get(to)?.kind ?? "")) addEdge(from, to, "uses-type", name);
+        } else if (unresolved && !Node.isPropertyAccessExpression(name.getParent() ?? name)) {
+          // A type this diff removed, still written somewhere.
+          for (const removedId of removedByName.get(last.getText()) ?? []) addEdge(from, removedId, "calls-removed", name);
+        }
+      }
+    }
+
     return walkNeighbourhood({ meta, linesOf, calls: collector.calls, changedIds: input.changedIds, depth: input.depth });
   }
 }
